@@ -1,0 +1,14 @@
+uso,columna_recomendada,descripcion
+Empresa,nombre_empresa,Nombre o razón social de la empresa
+Código,codigo_acceso,Código privado enviado a la empresa para consultar sus resultados
+Fecha,_submission_time,Fecha de envío o actualización de la encuesta
+Calificación general,puntaje_general,Puntaje final en porcentaje de 0 a 100
+Nivel,nivel_avance,Nivel textual: Inicial, Medio, Alto, etc.
+Lectura para plan,lectura_para_plan,Texto de interpretación y próximos pasos
+Principio 1,puntaje_p1,Puntaje del principio o dimensión 1
+Principio 2,puntaje_p2,Puntaje del principio o dimensión 2
+Principio 3,puntaje_p3,Puntaje del principio o dimensión 3
+Principio 4,puntaje_p4,Puntaje del principio o dimensión 4
+Principio 5,puntaje_p5,Puntaje del principio o dimensión 5
+Principio 6,puntaje_p6,Puntaje del principio o dimensión 6
+Principio 7,puntaje_p7,Puntaje del principio o dimensión 7
