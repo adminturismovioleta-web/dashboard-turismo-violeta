@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v13 KOBO auth fix"
+APP_VERSION = "v14 código robusto KOBO"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -270,23 +270,108 @@ def detect_company_column(df: pd.DataFrame) -> str | None:
 
 def detect_access_code_column(df: pd.DataFrame) -> str | None:
     preferred = get_secret("ACCESS_CODE_COLUMN", "")
-    # Priorizar el nuevo campo creado por la empresa.
-    auto = find_column(
-        df,
-        "",
-        [
-            "codigo de acceso",
-            "código de acceso",
-            "cree un codigo de acceso",
-            "cree un código de acceso",
-            "ingresar luego",
-            "codigo para poder ingresar",
-            "código para poder ingresar",
-        ],
-    )
-    if auto:
-        return auto
-    return find_column(df, preferred, ["codigo", "código", "_id", "uuid", "instanceid"])
+    columns = detect_access_code_columns(df)
+    if preferred:
+        preferred_found = find_column(df, preferred, [])
+        if preferred_found:
+            return preferred_found
+    return columns[0] if columns else None
+
+
+def detect_access_code_columns(df: pd.DataFrame) -> list[str]:
+    """Devuelve todas las columnas plausibles de código de acceso.
+
+    Esto evita que la app falle si Kobo exporta el campo con una etiqueta larga,
+    un nombre técnico, o si existe todavía una columna vieja como _id.
+    """
+    if df.empty:
+        return []
+
+    preferred = get_secret("ACCESS_CODE_COLUMN", "")
+    ordered: list[str] = []
+
+    def add(col: str | None) -> None:
+        if col and col in df.columns and col not in ordered:
+            ordered.append(col)
+
+    add(find_column(df, preferred, []))
+
+    # Nuevo campo que la empresa crea manualmente en la encuesta.
+    strong_terms = [
+        "cree un codigo de acceso",
+        "cree un código de acceso",
+        "codigo de acceso",
+        "código de acceso",
+        "ingresar luego",
+        "codigo para poder ingresar",
+        "código para poder ingresar",
+        "necesario tener este codigo",
+        "necesario tener este código",
+    ]
+    for col in df.columns:
+        col_norm = norm_text(col)
+        if any(term in col_norm for term in [norm_text(x) for x in strong_terms]):
+            add(col)
+
+    # Fallbacks técnicos si no existe el campo nuevo o si se quiere validar con IDs anteriores.
+    for col in df.columns:
+        col_norm = norm_text(col)
+        if col_norm in {"codigo", "código", "codigo_acceso", "codigo acceso", "_id", "uuid", "meta/instanceid", "instanceid"}:
+            add(col)
+
+    return ordered
+
+
+def normalize_access_code(value: Any) -> str:
+    """Normaliza códigos para comparar sin errores por Excel/KOBO.
+
+    Casos que corrige:
+    - 793682208 vs 793682208.0
+    - espacios, saltos de línea, NBSP y caracteres invisibles
+    - comillas pegadas al copiar/pegar
+    - diferencias de mayúsculas/minúsculas
+    """
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return ""
+    text = str(value)
+    text = unicodedata.normalize("NFKC", text)
+    text = text.replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+    text = text.replace("\xa0", " ").strip().strip('"').strip("'").strip()
+    text = re.sub(r"\s+", "", text)
+
+    # Excel o pandas pueden convertir un código numérico a decimal o notación científica.
+    numeric_like = text.replace(",", ".")
+    if re.fullmatch(r"\d+\.0+", numeric_like):
+        numeric_like = numeric_like.split(".", 1)[0]
+    elif re.fullmatch(r"\d+(?:\.\d+)?[eE][+\-]?\d+", numeric_like):
+        try:
+            numeric_like = str(int(float(numeric_like)))
+        except Exception:
+            pass
+    text = numeric_like
+
+    return text.upper()
+
+
+def find_valid_records_by_code(company_records: pd.DataFrame, code_columns: list[str], typed_code: str) -> tuple[pd.DataFrame, str | None]:
+    typed_norm = normalize_access_code(typed_code)
+    if not typed_norm:
+        return company_records.iloc[0:0], None
+
+    for col in code_columns:
+        if col not in company_records.columns:
+            continue
+        normalized_series = company_records[col].apply(normalize_access_code)
+        mask = normalized_series == typed_norm
+        if mask.any():
+            return company_records.loc[mask].copy(), col
+
+    return company_records.iloc[0:0], None
+
+
+def normalize_company(value: Any) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).replace("\xa0", " ").strip()
+    return re.sub(r"\s+", " ", text).casefold()
 
 
 def parse_date(value: Any) -> str:
@@ -506,14 +591,26 @@ def render_header() -> None:
 def render_company_view(df: pd.DataFrame, company_col: str | None, code_col: str | None) -> None:
     st.subheader("Acceso a resultados de empresa")
 
+    if st.button("Actualizar datos desde KOBO", help="Limpia el caché de Streamlit y vuelve a consultar la fuente de KOBO."):
+        st.cache_data.clear()
+        st.rerun()
+
     if not company_col:
         st.error("No se detectó la columna de nombre de empresa. Revise COMPANY_COLUMN en Secrets.")
         return
-    if not code_col:
-        st.error("No se detectó la columna de código de acceso. Revise que el formulario exporte el campo 'Código de acceso'.")
+
+    code_columns = detect_access_code_columns(df)
+    if not code_columns:
+        st.error("No se detectó ninguna columna de código de acceso. Revise que el formulario exporte el campo 'Código de acceso'.")
         return
 
-    companies = sorted([c for c in df[company_col].dropna().astype(str).unique() if c.strip()])
+    # Construir lista de empresas preservando el nombre visible, pero agrupando por versión normalizada.
+    visible_by_norm: dict[str, str] = {}
+    for value in df[company_col].dropna().astype(str):
+        if value.strip():
+            visible_by_norm.setdefault(normalize_company(value), value.strip())
+    companies = sorted(visible_by_norm.values(), key=lambda x: x.casefold())
+
     if not companies:
         st.warning("No hay empresas disponibles en la fuente de datos.")
         return
@@ -524,22 +621,37 @@ def render_company_view(df: pd.DataFrame, company_col: str | None, code_col: str
     with col2:
         typed_code = st.text_input("Código de acceso", type="password")
 
-    company_records = df[df[company_col].astype(str).str.strip() == selected_company]
+    selected_norm = normalize_company(selected_company)
+    company_records = df[df[company_col].apply(normalize_company) == selected_norm].copy()
+
     if not typed_code:
         st.info("Seleccione la empresa y escriba el código de acceso creado al final de la encuesta.")
+        with st.expander("Ayuda rápida"):
+            st.write("La app compara el código ignorando espacios accidentales, mayúsculas/minúsculas y conversiones de Excel como .0.")
+            st.write(f"Columna de empresa detectada: {company_col}")
+            st.write(f"Columnas de código detectadas: {', '.join(code_columns)}")
         return
 
-    code_series = company_records[code_col].fillna("").astype(str).str.strip()
-    valid_records = company_records[code_series == typed_code.strip()]
+    valid_records, matched_code_col = find_valid_records_by_code(company_records, code_columns, typed_code)
 
     if valid_records.empty:
-        st.error("No se encontró una encuesta con esa combinación de empresa y código. Verifique mayúsculas, números, signos y espacios.")
+        st.error("No se encontró una encuesta con esa combinación de empresa y código. Verifique que la app ya haya actualizado los datos desde KOBO.")
         with st.expander("Ayuda rápida"):
             st.write(f"Columna usada como empresa: {company_col}")
-            st.write(f"Columna usada como código: {code_col}")
-            st.write("El código se compara sin espacios al inicio o final, pero respetando el contenido escrito por la empresa.")
+            st.write(f"Columnas revisadas como código: {', '.join(code_columns)}")
+            st.write("El código se compara de forma robusta: sin espacios, sin .0 de Excel y sin diferenciar mayúsculas/minúsculas.")
+            st.write("Si acabas de enviar la encuesta, presiona 'Actualizar datos desde KOBO'.")
+            admin_pw = st.text_input("Clave de administrador para ver códigos disponibles de esta empresa", type="password", key="admin_code_debug")
+            if admin_pw == get_secret("ADMIN_PASSWORD", "TurismoVioleta2026"):
+                debug_rows = []
+                for col in code_columns:
+                    if col in company_records.columns:
+                        for raw in company_records[col].dropna().astype(str).unique():
+                            debug_rows.append({"columna": col, "valor exportado": raw, "valor normalizado": normalize_access_code(raw)})
+                st.dataframe(pd.DataFrame(debug_rows), use_container_width=True, hide_index=True)
         return
 
+    st.success(f"Acceso validado con la columna: {matched_code_col}")
     row = latest_row(valid_records)
     render_result(row, df, selected_company)
 
@@ -640,7 +752,8 @@ def render_diagnostics(df: pd.DataFrame, company_col: str | None, code_col: str 
     st.write(f"Filas cargadas: {len(df)}")
     st.write(f"Columnas cargadas: {len(df.columns)}")
     st.write(f"Columna empresa detectada: {company_col}")
-    st.write(f"Columna código detectada: {code_col}")
+    st.write(f"Columna código principal detectada: {code_col}")
+    st.write(f"Todas las columnas posibles de código: {detect_access_code_columns(df)}")
     st.write("Primeras columnas detectadas:")
     st.dataframe(pd.DataFrame({"columna": list(df.columns)[:80]}), use_container_width=True, hide_index=True)
 
