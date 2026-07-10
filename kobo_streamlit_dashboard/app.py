@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v15 corrección gráficos duplicados"
+APP_VERSION = "v16 indicadores completos y WEPs 1-7"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -20,119 +20,497 @@ st.set_page_config(
     layout="wide",
 )
 
-PRINCIPLES = [
-    {
-        "id": 1,
-        "title": "Promover la igualdad de género desde la dirección al más alto nivel",
-        "objectives": [1, 2, 3],
-        "documents": "Principios WEPs; Acuerdo MDT-2025-102; documentos WEPs 1 al 8.",
-        "reading": "Reforzar compromiso de alta dirección, gobernanza, Comité de Igualdad, políticas institucionales y seguimiento del plan.",
-    },
-    {
-        "id": 2,
-        "title": "Trato equitativo, derechos humanos y no discriminación en el trabajo",
-        "objectives": [1, 2, 5, 7],
-        "documents": "Principios WEPs; Acuerdo MDT-2025-102; Protocolo Turismo Violeta y Tool Kit.",
-        "reading": "Priorizar trato equitativo, no discriminación, igualdad en selección, promoción, formación, remuneración y condiciones laborales.",
-    },
-    {
-        "id": 3,
-        "title": "Salud, seguridad, bienestar y vida libre de violencia",
-        "objectives": [4, 5, 7],
-        "documents": "Protocolo Turismo Violeta; Tool Kit; Acuerdo MDT-2025-102 y Manual ESNNA.",
-        "reading": "Fortalecer seguridad, salud, bienestar, prevención de violencia y acoso, rutas de atención, derivación y protección.",
-    },
-    {
-        "id": 4,
-        "title": "Educación, formación y desarrollo profesional de mujeres y grupos subrepresentados",
-        "objectives": [6, 7],
-        "documents": "Principios WEPs y Tool Kit para capacitación y fortalecimiento de capacidades.",
-        "reading": "Consolidar educación, formación, desarrollo profesional y participación de mujeres y grupos subrepresentados.",
-    },
-    {
-        "id": 5,
-        "title": "Desarrollo empresarial, cadena de suministro y marketing a favor del empoderamiento de las mujeres",
-        "objectives": [8, 9],
-        "documents": "Principios WEPs y Tool Kit para marketing, proveedores y cadena de valor.",
-        "reading": "Ajustar prácticas empresariales, marketing responsable, cadena de suministro, proveedores y compras con enfoque de igualdad.",
-    },
-    {
-        "id": 6,
-        "title": "Igualdad mediante iniciativas comunitarias y participación territorial",
-        "objectives": [10, 11],
-        "documents": "Principios WEPs; Plan Integral de Seguridad Turística y Protocolo Turismo Violeta.",
-        "reading": "Fortalecer iniciativas comunitarias, participación territorial, pagos transparentes, alianzas locales y saberes ancestrales.",
-    },
-]
+# Configuración común para evitar zoom, barra de herramientas o interacción accidental en gráficos.
+CHART_CONFIG = {"displayModeBar": False, "staticPlot": True, "scrollZoom": False, "responsive": True}
 
-OBJECTIVES = {
-    1: {
-        "title": "Compromiso institucional y liderazgo de alta dirección",
-        "indicators": "1, 2, 3",
-        "reading": "Formalizar el compromiso de la dirección, comunicarlo internamente y convertirlo en responsabilidades concretas.",
-        "keywords": ["objetivo 1", "compromiso institucional", "liderazgo", "alta direccion", "alta dirección"],
-    },
-    2: {
-        "title": "Política interna de igualdad y no discriminación",
-        "indicators": "4, 5, 6, 7",
-        "reading": "Revisar políticas internas para asegurar criterios explícitos de igualdad, no discriminación y derechos humanos.",
-        "keywords": ["objetivo 2", "politica interna", "política interna", "no discriminacion", "no discriminación"],
-    },
-    3: {
-        "title": "Comité de Igualdad y gobernanza del plan",
-        "indicators": "8, 9, 20, 21, 22",
-        "reading": "Formalizar el Comité de Igualdad, generar actas, capacitar integrantes y establecer seguimiento periódico.",
-        "keywords": ["objetivo 3", "comite", "comité", "gobernanza"],
-    },
-    4: {
-        "title": "Prevención de violencia, acoso y rutas de atención",
-        "indicators": "10, 11, 12, 13, 14",
-        "reading": "Implementar o actualizar rutas de prevención, atención, derivación y protección frente a violencia y acoso.",
-        "keywords": ["objetivo 4", "violencia", "acoso", "rutas de atencion", "rutas de atención"],
-    },
-    5: {
-        "title": "Derechos laborales, conciliación y condiciones de trabajo",
-        "indicators": "15, 16, 17, 18, 19",
-        "reading": "Fortalecer condiciones laborales, conciliación, remuneración, selección y promoción con enfoque de igualdad.",
-        "keywords": ["objetivo 5", "derechos laborales", "conciliacion", "conciliación", "condiciones de trabajo"],
-    },
-    6: {
-        "title": "Educación, formación y desarrollo profesional",
-        "indicators": "23, 24, 25, 26, 27",
-        "reading": "Planificar capacitación periódica, desarrollo profesional y fortalecimiento de capacidades con enfoque de igualdad.",
-        "keywords": ["objetivo 6", "educacion", "educación", "formacion", "formación", "desarrollo profesional"],
-    },
-    7: {
-        "title": "Participación de mujeres y grupos subrepresentados",
-        "indicators": "28, 29, 30, 31, 32, 33, 34",
-        "reading": "Reducir brechas de participación, representación y oportunidades para mujeres y grupos subrepresentados.",
-        "keywords": ["objetivo 7", "participacion", "participación", "grupos subrepresentados", "mujeres"],
-    },
-    8: {
-        "title": "Cadena de suministro, proveedores y compras responsables",
-        "indicators": "35, 36, 37, 38",
-        "reading": "Incorporar criterios de igualdad en proveedores, compras, contratación y relaciones con la cadena de valor.",
-        "keywords": ["objetivo 8", "cadena de suministro", "proveedores", "compras"],
-    },
-    9: {
-        "title": "Marketing, comunicación y promoción responsable",
-        "indicators": "39, 40, 41, 42",
-        "reading": "Revisar comunicación, marketing y promoción para evitar estereotipos y fortalecer mensajes de igualdad.",
-        "keywords": ["objetivo 9", "marketing", "comunicacion", "comunicación", "promocion", "promoción"],
-    },
-    10: {
-        "title": "Iniciativas comunitarias y articulación territorial",
-        "indicators": "43, 44, 45",
-        "reading": "Fortalecer alianzas locales, participación territorial e iniciativas comunitarias con enfoque de igualdad.",
-        "keywords": ["objetivo 10", "comunitarias", "territorial", "alianzas locales"],
-    },
-    11: {
-        "title": "Transparencia, seguimiento y rendición de cuentas",
-        "indicators": "46, 47, 48",
-        "reading": "Definir responsables, metas, evidencia y seguimiento periódico para sostener el plan de igualdad.",
-        "keywords": ["objetivo 11", "transparencia", "seguimiento", "rendicion", "rendición"],
-    },
-}
+# Metadatos reconstruidos desde el XLSForm recibido el 10/07.
+# Incluye los 7 principios WEPs, 13 objetivos y 48 indicadores en el orden lógico del formulario.
+PRINCIPLES = [{'id': 1,
+  'title': 'Promover la igualdad de género desde la dirección al más alto nivel',
+  'objectives': [3],
+  'documents': 'Principios WEPS; complementar con Acuerdo MDT-2025-102 cuando existan brechas laborales.',
+  'reading': 'Reforzar compromiso de alta dirección, gobernanza, Comité de Igualdad, políticas institucionales y '
+             'seguimiento del plan.',
+  'score_field': 'score_wep_1_pct',
+  'level_field': 'nivel_wep_1',
+  'reading_field': 'inf_wep_01_lectura_plan'},
+ {'id': 2,
+  'title': 'Trato equitativo, derechos humanos y no discriminación en el trabajo',
+  'objectives': [1, 2],
+  'documents': 'Principios WEPS, Acuerdo MDT-2025-102, Protocolo Turismo Violeta y Tool Kit.',
+  'reading': 'Priorizar trato equitativo, no discriminación, igualdad en selección, promoción, formación, remuneración '
+             'y condiciones laborales.',
+  'score_field': 'score_wep_2_pct',
+  'level_field': 'nivel_wep_2',
+  'reading_field': 'inf_wep_02_lectura_plan'},
+ {'id': 3,
+  'title': 'Salud, seguridad, bienestar y vida libre de violencia',
+  'objectives': [4, 5],
+  'documents': 'Protocolo Turismo Violeta, Tool Kit, Acuerdo MDT-2025-102 y Manual ESNNA.',
+  'reading': 'Fortalecer seguridad, salud, bienestar, prevención de violencia y acoso, rutas de atención, derivación y '
+             'protección.',
+  'score_field': 'score_wep_3_pct',
+  'level_field': 'nivel_wep_3',
+  'reading_field': 'inf_wep_03_lectura_plan'},
+ {'id': 4,
+  'title': 'Educación, formación y desarrollo profesional de mujeres y grupos subrepresentados',
+  'objectives': [6, 7],
+  'documents': 'Principios WEPS y Tool Kit para capacitación y fortalecimiento de capacidades.',
+  'reading': 'Consolidar educación, formación, desarrollo profesional y participación de mujeres y grupos '
+             'subrepresentados.',
+  'score_field': 'score_wep_4_pct',
+  'level_field': 'nivel_wep_4',
+  'reading_field': 'inf_wep_04_lectura_plan'},
+ {'id': 5,
+  'title': 'Desarrollo empresarial, cadena de suministro y marketing a favor del empoderamiento de las mujeres',
+  'objectives': [8, 9],
+  'documents': 'Principios WEPS y Tool Kit para marketing, proveedores y cadena de valor.',
+  'reading': 'Ajustar prácticas empresariales, marketing responsable, cadena de suministro, proveedores y compras con '
+             'enfoque de igualdad.',
+  'score_field': 'score_wep_5_pct',
+  'level_field': 'nivel_wep_5',
+  'reading_field': 'inf_wep_05_lectura_plan'},
+ {'id': 6,
+  'title': 'Igualdad mediante iniciativas comunitarias y participación territorial',
+  'objectives': [10, 11],
+  'documents': 'Principios WEPS, Plan Integral de Seguridad Turística y Protocolo Turismo Violeta.',
+  'reading': 'Fortalecer iniciativas comunitarias, participación territorial, pagos transparentes, alianzas locales y '
+             'saberes ancestrales.',
+  'score_field': 'score_wep_6_pct',
+  'level_field': 'nivel_wep_6',
+  'reading_field': 'inf_wep_06_lectura_plan'},
+ {'id': 7,
+  'title': 'Evaluar y difundir los progresos realizados a favor de la igualdad de género',
+  'objectives': [12, 13],
+  'documents': 'Principios WEPS, Protocolo Turismo Violeta y Tool Kit para seguimiento, evidencias y comunicación de '
+               'avances.',
+  'reading': 'Institucionalizar monitoreo, indicadores, informes, comunicación de avances, rendición de cuentas y '
+             'mejora continua.',
+  'score_field': 'score_wep_7_pct',
+  'level_field': 'nivel_wep_7',
+  'reading_field': 'inf_wep_07_lectura_plan'}]
+
+OBJECTIVES = {1: {'id': 1,
+     'title': 'Equidad de género en selección, promoción, formación, liderazgo y remuneración',
+     'linked': 'Principios relacionados: WEPS 1 y 2',
+     'score_field': 'inf_obj_01_pct',
+     'level_field': 'inf_obj_01_nivel',
+     'reading_field': 'inf_obj_01_lectura_plan',
+     'reading': 'Priorizar los indicadores con score menor a 76%, especialmente políticas, datos desagregados, brecha '
+                'salarial y participación equilibrada.',
+     'indicators': [1, 2, 3, 4, 5, 6, 7]},
+ 2: {'id': 2,
+     'title': 'Participación de mujeres en nivel operativo, liderazgo y espacios de planificación local',
+     'linked': 'Principios relacionados: WEPS 1, 2 y 6',
+     'score_field': 'inf_obj_02_pct',
+     'level_field': 'inf_obj_02_nivel',
+     'reading_field': 'inf_obj_02_lectura_plan',
+     'reading': 'Fortalecer participación de mujeres en áreas operativas y espacios externos de '
+                'articulación/planificación.',
+     'indicators': [39]},
+ 3: {'id': 3,
+     'title': 'Comité de Igualdad y gobernanza del plan',
+     'linked': 'Principio relacionado: WEPS 1',
+     'score_field': 'inf_obj_03_pct',
+     'level_field': 'inf_obj_03_nivel',
+     'reading_field': 'inf_obj_03_lectura_plan',
+     'reading': 'Formalizar el comité, generar actas, capacitar integrantes y establecer seguimiento periódico.',
+     'indicators': [8, 9, 20, 21, 22]},
+ 4: {'id': 4,
+     'title': 'Gestión de riesgos sobre trata, tráfico y explotación sexual en turismo',
+     'linked': 'Principio relacionado: WEPS 3',
+     'score_field': 'inf_obj_04_pct',
+     'level_field': 'inf_obj_04_nivel',
+     'reading_field': 'inf_obj_04_lectura_plan',
+     'reading': 'Implementar rutas, protocolos, reportes y evidencias de coordinación con autoridades.',
+     'indicators': [18, 19, 36]},
+ 5: {'id': 5,
+     'title': 'Lugar de trabajo seguro, libre de acoso, violencia, discriminación y con rutas de atención',
+     'linked': 'Principios relacionados: WEPS 2 y 3',
+     'score_field': 'inf_obj_05_pct',
+     'level_field': 'inf_obj_05_nivel',
+     'reading_field': 'inf_obj_05_lectura_plan',
+     'reading': 'Cerrar brechas en registro, atención, derivación, sanción, prevención, protocolos y rutas '
+                'internas/externas.',
+     'indicators': [10, 11, 12, 13, 14, 15, 16, 17]},
+ 6: {'id': 6,
+     'title': 'Desarrollo profesional de mujeres y grupos subrepresentados',
+     'linked': 'Principio relacionado: WEPS 4',
+     'score_field': 'inf_obj_06_pct',
+     'level_field': 'inf_obj_06_nivel',
+     'reading_field': 'inf_obj_06_lectura_plan',
+     'reading': 'Consolidar plan de capacitación, cobertura, participación desagregada y evidencias por tema.',
+     'indicators': [23, 24, 25, 26, 27, 28]},
+ 7: {'id': 7,
+     'title': 'Capacitación y sensibilización en igualdad, prevención y cero tolerancia',
+     'linked': 'Principios relacionados: WEPS 3 y 4',
+     'score_field': 'inf_obj_07_pct',
+     'level_field': 'inf_obj_07_nivel',
+     'reading_field': 'inf_obj_07_lectura_plan',
+     'reading': 'Priorizar capacitación anual, cobertura alta del personal y registro desagregado de participantes.',
+     'indicators': [29, 30, 31, 32, 33, 34]},
+ 8: {'id': 8,
+     'title': 'Comunicación y marketing responsable sin estereotipos ni discriminación',
+     'linked': 'Principio relacionado: WEPS 5',
+     'score_field': 'inf_obj_08_pct',
+     'level_field': 'inf_obj_08_nivel',
+     'reading_field': 'inf_obj_08_lectura_plan',
+     'reading': 'Implementar revisión periódica de contenidos y criterios de marketing responsable.',
+     'indicators': [35]},
+ 9: {'id': 9,
+     'title': 'Proveedores, cadena de valor y compras responsables con enfoque de igualdad',
+     'linked': 'Principio relacionado: WEPS 5',
+     'score_field': 'inf_obj_09_pct',
+     'level_field': 'inf_obj_09_nivel',
+     'reading_field': 'inf_obj_09_lectura_plan',
+     'reading': 'Incorporar lineamientos de igualdad en proveedores, priorización de compras y desagregación de datos '
+                'de la cadena de valor.',
+     'indicators': [37, 38, 40, 41, 42]},
+ 10: {'id': 10,
+      'title': 'Vinculación comunitaria, participación territorial y pagos con enfoque de igualdad',
+      'linked': 'Principio relacionado: WEPS 6',
+      'score_field': 'inf_obj_10_pct',
+      'level_field': 'inf_obj_10_nivel',
+      'reading_field': 'inf_obj_10_lectura_plan',
+      'reading': 'Fortalecer participación con gad/actores locales, transparencia de pagos y participación de mujeres '
+                 'en servicios comunitarios.',
+      'indicators': [43]},
+ 11: {'id': 11,
+      'title': 'Difusión de saberes ancestrales y patrimonio cultural con participación de mujeres',
+      'linked': 'Principio relacionado: WEPS 6',
+      'score_field': 'inf_obj_11_pct',
+      'level_field': 'inf_obj_11_nivel',
+      'reading_field': 'inf_obj_11_lectura_plan',
+      'reading': 'Documentar actividades, participantes y mecanismos para visibilizar saberes de mujeres y '
+                 'comunidades.',
+      'indicators': [44, 45]},
+ 12: {'id': 12,
+      'title': 'Monitoreo, evaluación y seguimiento del plan',
+      'linked': 'Principio relacionado: WEPS 7',
+      'score_field': 'inf_obj_12_pct',
+      'level_field': 'inf_obj_12_nivel',
+      'reading_field': 'inf_obj_12_lectura_plan',
+      'reading': 'Establecer informes periódicos, ejecución planificada y tablero de seguimiento.',
+      'indicators': [46, 47]},
+ 13: {'id': 13,
+      'title': 'Comunicación de buenas prácticas, informe anual y reconocimiento público',
+      'linked': 'Principio relacionado: WEPS 7',
+      'score_field': 'inf_obj_13_pct',
+      'level_field': 'inf_obj_13_nivel',
+      'reading_field': 'inf_obj_13_lectura_plan',
+      'reading': 'Preparar informe anual, comunicar resultados y postular avances verificables a reconocimientos o '
+                 'buenas prácticas.',
+      'indicators': [48]}}
+
+INDICATORS = {1: {'id': 1,
+     'title': 'Número de mujeres / Número de hombres por área.',
+     'score_field': 'inf_ind_001_score',
+     'level_field': 'inf_ind_001_nivel',
+     'ref': 'WEPS: 1, 2 | TV: 1, 2 | #: 1',
+     'method': 'Metodología: se toma la información agregada de nómina por sexo registrada en la pregunta 17. Cuando exista detalle por '
+               'área, debe complementarse en las notas de seguimiento.'},
+ 2: {'id': 2,
+     'title': 'Número de mujeres / Número de hombres por cargo.',
+     'score_field': 'inf_ind_002_score',
+     'level_field': 'inf_ind_002_nivel',
+     'ref': 'WEPS: 1, 2 | TV: 1, 2 | #: 1',
+     'method': 'Metodología: usa la medición estructurada de liderazgo y nivel operativo como aproximación a cargos/niveles. Si existen '
+               'más cargos, debe registrarse el detalle en las notas.'},
+ 3: {'id': 3,
+     'title': 'Número de mujeres / Número de hombres en procesos de selección.',
+     'score_field': 'inf_ind_003_score',
+     'level_field': 'inf_ind_003_nivel',
+     'ref': 'WEPS: 1, 2 | TV: 1, 2 | #: 1',
+     'method': 'Metodología: calcula total y participación de mujeres en procesos de selección. El puntaje valora equilibrio de '
+               'participación: 40%-60% = avanzado; 30%-70% = parcial; fuera de ese rango = inicial.'},
+ 4: {'id': 4,
+     'title': 'Número de mujeres / Número de hombres en procesos de promoción/ascensos.',
+     'score_field': 'inf_ind_004_score',
+     'level_field': 'inf_ind_004_nivel',
+     'ref': 'WEPS: 1,2 | TV: 1,2 | #: 2',
+     'method': 'Metodología: calcula la participación de mujeres en procesos de promoción o ascenso y mide equilibrio relativo.'},
+ 5: {'id': 5,
+     'title': 'Número de mujeres / Número de hombres en procesos de formación.',
+     'score_field': 'inf_ind_005_score',
+     'level_field': 'inf_ind_005_nivel',
+     'ref': 'WEPS: 1,2 | TV: 1,2 | #: 3',
+     'method': 'Metodología: calcula la participación de mujeres en procesos de formación/capacitación y mide equilibrio relativo.'},
+ 6: {'id': 6,
+     'title': 'Remuneración promedio de mujeres por cargo / remuneración promedio de hombres por cargo.',
+     'score_field': 'inf_ind_006_score',
+     'level_field': 'inf_ind_006_nivel',
+     'ref': 'WEPS: 1,2 | TV: 1,2 | #: 4',
+     'method': 'Metodología: compara remuneraciones promedio de mujeres y hombres en cargos directivos, medios y operativos. El puntaje se '
+               'reduce cuando existe brecha salarial a favor de hombres.'},
+ 7: {'id': 7,
+     'title': 'Número de mujeres / Número de hombres en puesto de liderazgo.',
+     'score_field': 'inf_ind_007_score',
+     'level_field': 'inf_ind_007_nivel',
+     'ref': 'WEPS: 1,2 | TV: 1,2 | #: 5',
+     'method': 'Metodología: mide la participación de mujeres en puestos de liderazgo o decisión.'},
+ 39: {'id': 39,
+      'title': 'Número de espacios de participación con Ejecutivo / GAD u otros actores en procesos que empoderen a las mujeres.',
+      'score_field': 'inf_ind_039_score',
+      'level_field': 'inf_ind_039_nivel',
+      'ref': 'WEPS: 6 | TV: 6 | #: 23',
+      'method': 'Metodología: verifica participación en espacios de articulación o planificación local vinculados al empoderamiento de '
+                'mujeres en turismo.'},
+ 8: {'id': 8,
+     'title': 'Número de mujeres / Número de hombres que conforman el Comité.',
+     'score_field': 'inf_ind_008_score',
+     'level_field': 'inf_ind_008_nivel',
+     'ref': 'WEPS: 1,2 | TV: 1,2 | #: 6',
+     'method': 'Metodología: mide composición del Comité de Igualdad y equilibrio de participación.'},
+ 9: {'id': 9,
+     'title': 'Nro. de Actas de reunión del Comité de Igualdad.',
+     'score_field': 'inf_ind_009_score',
+     'level_field': 'inf_ind_009_nivel',
+     'ref': 'WEPS: 1,2 | TV: 1,2 | #: 6',
+     'method': 'Metodología: verifica si existen actas o registros formales de reunión del Comité durante el último año.'},
+ 20: {'id': 20,
+      'title': 'Número de mujeres / Número de hombres que conforman el Comité.',
+      'score_field': 'inf_ind_020_score',
+      'level_field': 'inf_ind_020_nivel',
+      'ref': 'WEPS: 3 | TV: 3 | #: 15',
+      'method': 'Metodología: usa la composición del Comité de Igualdad como base de gobernanza para prevención y seguimiento.'},
+ 21: {'id': 21,
+      'title': 'Nro. de Actas de reunión del Comité de Igualdad.',
+      'score_field': 'inf_ind_021_score',
+      'level_field': 'inf_ind_021_nivel',
+      'ref': 'WEPS: 3 | TV: 3 | #: 15',
+      'method': 'Metodología: verifica si el Comité cuenta con actas/registros de reunión.'},
+ 22: {'id': 22,
+      'title': 'Nro. de procesos de capacitación en los que han participado los integrantes del Comité de SSO.',
+      'score_field': 'inf_ind_022_score',
+      'level_field': 'inf_ind_022_nivel',
+      'ref': 'WEPS: 3 | TV: 3 | #: 15',
+      'method': 'Metodología: calcula porcentaje de personas delegadas para SSO/atención de riesgos capacitadas en prevención, '
+                'identificación y respuesta.'},
+ 18: {'id': 18,
+      'title': 'Número de activaciones del protocolo ante situaciones de trata y tráfico de personas, desagregado por sexo y edad.',
+      'score_field': 'inf_ind_018_score',
+      'level_field': 'inf_ind_018_nivel',
+      'ref': 'WEPS: 3 | TV: 3 | #: 14',
+      'method': 'Metodología: registra activaciones del protocolo de trata/tráfico. El puntaje mide capacidad de registro y desagregación, '
+                'no la ocurrencia de casos.'},
+ 19: {'id': 19,
+      'title': 'Número de reportes realizados a autoridades locales por presunción de trata o tráfico de personas, desagregado por sexo.',
+      'score_field': 'inf_ind_019_score',
+      'level_field': 'inf_ind_019_nivel',
+      'ref': 'WEPS: 3 | TV: 3 | #: 14',
+      'method': 'Metodología: si existen activaciones, verifica reportes a autoridades. Si no existen activaciones y sí existe registro, '
+                'no se penaliza el indicador.'},
+ 36: {'id': 36,
+      'title': 'Número de reportes realizados a autoridades locales por presunción de trata o tráfico de personas, desagregado por sexo.',
+      'score_field': 'inf_ind_036_score',
+      'level_field': 'inf_ind_036_nivel',
+      'ref': 'WEPS: 5 | TV: 5 | #: 21',
+      'method': 'Metodología: usa el mismo registro de reportes a autoridades por presunción de trata/tráfico.'},
+ 10: {'id': 10,
+      'title': 'Número de casos de violencia, acoso, discriminación reportados internamente, desagregados por sexo.',
+      'score_field': 'inf_ind_010_score',
+      'level_field': 'inf_ind_010_nivel',
+      'ref': 'WEPS: 2,3 | TV: 2,3 | #: 7',
+      'method': 'Metodología: mide si existe registro consolidado, anonimizado y desagregado. El puntaje se basa en la capacidad de '
+                'registro, no en la existencia de casos.'},
+ 11: {'id': 11,
+      'title': 'Número de casos resueltos dentro de los plazos establecidos.',
+      'score_field': 'inf_ind_011_score',
+      'level_field': 'inf_ind_011_nivel',
+      'ref': 'WEPS: 2,3 | TV: 2,3 | #: 8',
+      'method': 'Metodología: calcula el porcentaje de casos resueltos dentro de plazo sobre el total de casos reportados.'},
+ 12: {'id': 12,
+      'title': 'Número de casos resueltos dentro de los plazos establecidos.',
+      'score_field': 'inf_ind_012_score',
+      'level_field': 'inf_ind_012_nivel',
+      'ref': 'WEPS: 3 | TV: 3 | #: 9',
+      'method': 'Metodología: mantiene la trazabilidad del indicador duplicado de la matriz original. Usa la misma base de cálculo de '
+                'resolución dentro de plazo.'},
+ 13: {'id': 13,
+      'title': 'Número y grado de sanciones ejecutadas desagregado por sexo.',
+      'score_field': 'inf_ind_013_score',
+      'level_field': 'inf_ind_013_nivel',
+      'ref': 'WEPS: 3 | TV: 3 | #: 10',
+      'method': 'Metodología: registra sanciones ejecutadas de manera agregada. Si no existen casos reportados y sí existe registro, no se '
+                'penaliza el indicador; si hay casos pero no sanciones/seguimiento, queda como avance inicial.'},
+ 14: {'id': 14,
+      'title': 'Número de programas de prevención de violencia contra las mujeres desarrollados.',
+      'score_field': 'inf_ind_014_score',
+      'level_field': 'inf_ind_014_nivel',
+      'ref': 'WEPS: 3 | TV: 3 | #: 12',
+      'method': 'Metodología: verifica existencia de programas de prevención desarrollados.'},
+ 15: {'id': 15,
+      'title': 'Número de mujeres / Número de hombres beneficiados de los programas de prevención de violencia contra las mujeres.',
+      'score_field': 'inf_ind_015_score',
+      'level_field': 'inf_ind_015_nivel',
+      'ref': 'WEPS: 3 | TV: 3 | #: 12',
+      'method': 'Metodología: calcula beneficiarios de programas de prevención y cobertura estimada frente al total de personal.'},
+ 16: {'id': 16,
+      'title': 'Número de mujeres / Número de hombres que recibieron atención interna.',
+      'score_field': 'inf_ind_016_score',
+      'level_field': 'inf_ind_016_nivel',
+      'ref': 'WEPS: 3 | TV: 3 | #: 13',
+      'method': 'Metodología: registra atención interna de forma agregada. Si no existen casos y sí existe registro, no se penaliza el '
+                'indicador.'},
+ 17: {'id': 17,
+      'title': 'Número de mujeres / Número de hombres derivados a servicios externos.',
+      'score_field': 'inf_ind_017_score',
+      'level_field': 'inf_ind_017_nivel',
+      'ref': 'WEPS: 3 | TV: 3 | #: 13',
+      'method': 'Metodología: registra derivaciones externas. Si no existen casos y sí existe registro, no se penaliza el indicador.'},
+ 23: {'id': 23,
+      'title': 'Número de capacitaciones realizadas a todo el personal.',
+      'score_field': 'inf_ind_023_score',
+      'level_field': 'inf_ind_023_nivel',
+      'ref': 'WEPS: 4 | TV: 4 | #: 16',
+      'method': 'Metodología: registra capacitaciones realizadas para todo el personal en igualdad, prevención de violencia, acoso, '
+                'discriminación o temas relacionados. Si hay más de un tema, detalle en notas.'},
+ 24: {'id': 24,
+      'title': '% de participación del personal.',
+      'score_field': 'inf_ind_024_score',
+      'level_field': 'inf_ind_024_nivel',
+      'ref': 'WEPS: 4 | TV: 4 | #: 16',
+      'method': 'Metodología: calcula cobertura de participación sobre el total de personal.'},
+ 25: {'id': 25,
+      'title': 'Número de mujeres / Número de hombres capacitados.',
+      'score_field': 'inf_ind_025_score',
+      'level_field': 'inf_ind_025_nivel',
+      'ref': 'WEPS: 4 | TV: 4 | #: 16',
+      'method': 'Metodología: registra personas capacitadas desagregadas por sexo/género.'},
+ 26: {'id': 26,
+      'title': 'Número de capacitaciones realizadas a todo el personal.',
+      'score_field': 'inf_ind_026_score',
+      'level_field': 'inf_ind_026_nivel',
+      'ref': 'WEPS: 4 | TV: 4 | #: 17',
+      'method': 'Metodología: registra capacitaciones realizadas para todo el personal en igualdad, prevención de violencia, acoso, '
+                'discriminación o temas relacionados. Si hay más de un tema, detalle en notas.'},
+ 27: {'id': 27,
+      'title': '% de participación del personal.',
+      'score_field': 'inf_ind_027_score',
+      'level_field': 'inf_ind_027_nivel',
+      'ref': 'WEPS: 4 | TV: 4 | #: 17',
+      'method': 'Metodología: calcula cobertura de participación sobre el total de personal.'},
+ 28: {'id': 28,
+      'title': 'Número de mujeres / Número de hombres capacitados.',
+      'score_field': 'inf_ind_028_score',
+      'level_field': 'inf_ind_028_nivel',
+      'ref': 'WEPS: 4 | TV: 4 | #: 17',
+      'method': 'Metodología: registra personas capacitadas desagregadas por sexo/género.'},
+ 29: {'id': 29,
+      'title': 'Número de capacitaciones realizadas a todo el personal.',
+      'score_field': 'inf_ind_029_score',
+      'level_field': 'inf_ind_029_nivel',
+      'ref': 'WEPS: 4 | TV: 4 | #: 18',
+      'method': 'Metodología: registra capacitaciones realizadas para todo el personal en igualdad, prevención de violencia, acoso, '
+                'discriminación o temas relacionados. Si hay más de un tema, detalle en notas.'},
+ 30: {'id': 30,
+      'title': '% de participación del personal.',
+      'score_field': 'inf_ind_030_score',
+      'level_field': 'inf_ind_030_nivel',
+      'ref': 'WEPS: 4 | TV: 4 | #: 18',
+      'method': 'Metodología: calcula cobertura de participación sobre el total de personal.'},
+ 31: {'id': 31,
+      'title': 'Número de mujeres / Número de hombres capacitados.',
+      'score_field': 'inf_ind_031_score',
+      'level_field': 'inf_ind_031_nivel',
+      'ref': 'WEPS: 4 | TV: 4 | #: 18',
+      'method': 'Metodología: registra personas capacitadas desagregadas por sexo/género.'},
+ 32: {'id': 32,
+      'title': 'Número de capacitaciones realizadas a todo el personal.',
+      'score_field': 'inf_ind_032_score',
+      'level_field': 'inf_ind_032_nivel',
+      'ref': 'WEPS: 4 | TV: 4 | #: 19',
+      'method': 'Metodología: registra capacitaciones realizadas para todo el personal en igualdad, prevención de violencia, acoso, '
+                'discriminación o temas relacionados. Si hay más de un tema, detalle en notas.'},
+ 33: {'id': 33,
+      'title': '% de participación del personal.',
+      'score_field': 'inf_ind_033_score',
+      'level_field': 'inf_ind_033_nivel',
+      'ref': 'WEPS: 4 | TV: 4 | #: 19',
+      'method': 'Metodología: calcula cobertura de participación sobre el total de personal.'},
+ 34: {'id': 34,
+      'title': 'Número de mujeres / Número de hombres capacitados.',
+      'score_field': 'inf_ind_034_score',
+      'level_field': 'inf_ind_034_nivel',
+      'ref': 'WEPS: 4 | TV: 4 | #: 19',
+      'method': 'Metodología: registra personas capacitadas desagregadas por sexo/género.'},
+ 35: {'id': 35,
+      'title': 'Nro. de monitoreo de contenidos de productos comunicacionales.',
+      'score_field': 'inf_ind_035_score',
+      'level_field': 'inf_ind_035_nivel',
+      'ref': 'WEPS: 5 | TV: 5 | #: 20',
+      'method': 'Metodología: verifica si se monitorean contenidos comunicacionales para evitar estereotipos, sexualización, '
+                'discriminación o mensajes contrarios a igualdad.'},
+ 37: {'id': 37,
+      'title': 'Número de proveedores identificados que incorporan lineamientos claros respecto a violencia, discriminación, tráfico y '
+               'trata.',
+      'score_field': 'inf_ind_037_score',
+      'level_field': 'inf_ind_037_nivel',
+      'ref': 'WEPS: 5 | TV: 5 | #: 22',
+      'method': 'Metodología: calcula porcentaje de proveedores/actores de cadena de valor con lineamientos claros.'},
+ 38: {'id': 38,
+      'title': 'Valor de compras realizadas a proveedores priorizados / valor de compras realizadas a todos los proveedores.',
+      'score_field': 'inf_ind_038_score',
+      'level_field': 'inf_ind_038_nivel',
+      'ref': 'WEPS: 5 | TV: 5 | #: 22',
+      'method': 'Metodología: calcula la participación del valor de compras priorizadas con enfoque de igualdad sobre el total de '
+                'compras.'},
+ 40: {'id': 40,
+      'title': 'Número de organizaciones de mujeres que forman parte de la cadena de valor de la organización.',
+      'score_field': 'inf_ind_040_score',
+      'level_field': 'inf_ind_040_nivel',
+      'ref': 'WEPS: 6 | TV: 6 | #: 23',
+      'method': 'Metodología: calcula presencia de organizaciones/comunidades lideradas por mujeres dentro de la cadena de valor.'},
+ 41: {'id': 41,
+      'title': 'Número de mujeres / Número de hombres de las organizaciones que forman parte de la cadena de valor.',
+      'score_field': 'inf_ind_041_score',
+      'level_field': 'inf_ind_041_nivel',
+      'ref': 'WEPS: 6 | TV: 6 | #: 23',
+      'method': 'Metodología: calcula composición por sexo/género de personas vinculadas a organizaciones de la cadena de valor.'},
+ 42: {'id': 42,
+      'title': 'Número de mujeres / Número de hombres que ocupan cargos directivos en organizaciones de la cadena de valor.',
+      'score_field': 'inf_ind_042_score',
+      'level_field': 'inf_ind_042_nivel',
+      'ref': 'WEPS: 6 | TV: 6 | #: 23',
+      'method': 'Metodología: calcula composición de cargos directivos en organizaciones vinculadas a la cadena de valor.'},
+ 43: {'id': 43,
+      'title': 'Número de mujeres / Número de hombres que recibieron pago por servicios brindados en la comunidad.',
+      'score_field': 'inf_ind_043_score',
+      'level_field': 'inf_ind_043_nivel',
+      'ref': 'WEPS: 6 | TV: 6 | #: 24',
+      'method': 'Metodología: calcula participación de mujeres tanto en número de personas pagadas como en valor de pagos comunitarios.'},
+ 44: {'id': 44,
+      'title': 'Número de mujeres / Número de hombres involucrados en la difusión de saberes ancestrales.',
+      'score_field': 'inf_ind_044_score',
+      'level_field': 'inf_ind_044_nivel',
+      'ref': 'WEPS: 6 | TV: 6 | #: 25',
+      'method': 'Metodología: registra personas involucradas en difusión de saberes ancestrales/patrimonio cultural y mide presencia de '
+                'mujeres.'},
+ 45: {'id': 45,
+      'title': 'Número de actividades de difusión de saberes ancestrales.',
+      'score_field': 'inf_ind_045_score',
+      'level_field': 'inf_ind_045_nivel',
+      'ref': 'WEPS: 6 | TV: 6 | #: 25',
+      'method': 'Metodología: verifica número de actividades o documentos de difusión de saberes ancestrales/patrimonio cultural.'},
+ 46: {'id': 46,
+      'title': 'Número de informes presentados que recojan evidencia e indicadores de las acciones realizadas.',
+      'score_field': 'inf_ind_046_score',
+      'level_field': 'inf_ind_046_nivel',
+      'ref': 'WEPS: 7 | TV: 7 | #: 26',
+      'method': 'Metodología: verifica existencia de informes con evidencia e indicadores del plan o acciones de igualdad.'},
+ 47: {'id': 47,
+      'title': '% de ejecución del plan, que compara lo ejecutado versus lo planificado.',
+      'score_field': 'inf_ind_047_score',
+      'level_field': 'inf_ind_047_nivel',
+      'ref': 'WEPS: 7 | TV: 7 | #: 27',
+      'method': 'Metodología: calcula porcentaje de acciones ejecutadas sobre acciones planificadas del Plan de Igualdad.'},
+ 48: {'id': 48,
+      'title': 'Informe anual presentado, que incluya los indicadores planteados.',
+      'score_field': 'inf_ind_048_score',
+      'level_field': 'inf_ind_048_nivel',
+      'ref': 'WEPS: 7 | TV: 7 | #: 28',
+      'method': 'Metodología: verifica si la organización cuenta con informe anual/reporte de sostenibilidad que incluya indicadores de '
+                'igualdad.'}}
 
 SCORE_WORDS = {
     "no tiene": 0,
@@ -151,12 +529,14 @@ SCORE_WORDS = {
     "implementado parcialmente": 3,
     "aprobado": 4,
     "formalizado": 4,
-    "implementado": 4,
     "difundido": 5,
+    "implementado": 4,
     "evaluado": 5,
     "rendicion": 5,
     "rendición": 5,
     "seguimiento": 5,
+    "rendicion de cuentas": 5,
+    "rendición de cuentas": 5,
 }
 
 
@@ -167,6 +547,10 @@ def norm_text(value: Any) -> str:
     text = unicodedata.normalize("NFKD", text)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def norm_id(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", norm_text(value))
 
 
 def clean_col(col: Any) -> str:
@@ -180,10 +564,7 @@ def get_secret(name: str, default: str = "") -> str:
         return default
 
 
-
-
 def sanitize_kobo_token(raw_token: str) -> str:
-    """Limpia el token de KOBO para evitar errores comunes en Streamlit Secrets."""
     token = str(raw_token or "").strip().strip('"').strip("'").strip()
     if token.lower().startswith("token "):
         token = token.split(" ", 1)[1].strip()
@@ -193,6 +574,7 @@ def sanitize_kobo_token(raw_token: str) -> str:
     if match:
         return match.group(0)
     return token
+
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_data_from_source(url: str, token: str) -> pd.DataFrame:
@@ -252,6 +634,42 @@ def find_column(df: pd.DataFrame, preferred: str, candidates: Iterable[str]) -> 
     return None
 
 
+def find_field_column(df: pd.DataFrame, field_name: str) -> str | None:
+    """Busca columnas exportadas por KOBO aunque vengan con prefijo de grupo o etiqueta larga."""
+    if df.empty or not field_name:
+        return None
+
+    wanted = norm_id(field_name)
+    columns = list(df.columns)
+
+    # Coincidencia exacta por nombre o por último segmento de rutas tipo group/name.
+    for col in columns:
+        parts = re.split(r"[/.:]", str(col))
+        if norm_id(col) == wanted or (parts and norm_id(parts[-1]) == wanted):
+            return col
+
+    # Coincidencia por final de columna. Evita perder campos dentro de grupos anidados.
+    for col in columns:
+        col_id = norm_id(col)
+        if col_id.endswith(wanted):
+            return col
+
+    # Coincidencia contenida, solo como respaldo.
+    for col in columns:
+        col_id = norm_id(col)
+        if wanted and wanted in col_id:
+            return col
+
+    return None
+
+
+def get_field_value(row: pd.Series, df: pd.DataFrame, field_name: str) -> Any:
+    col = find_field_column(df, field_name)
+    if not col:
+        return None
+    return row.get(col)
+
+
 def detect_company_column(df: pd.DataFrame) -> str | None:
     preferred = get_secret("COMPANY_COLUMN", "")
     return find_column(
@@ -279,11 +697,6 @@ def detect_access_code_column(df: pd.DataFrame) -> str | None:
 
 
 def detect_access_code_columns(df: pd.DataFrame) -> list[str]:
-    """Devuelve todas las columnas plausibles de código de acceso.
-
-    Esto evita que la app falle si Kobo exporta el campo con una etiqueta larga,
-    un nombre técnico, o si existe todavía una columna vieja como _id.
-    """
     if df.empty:
         return []
 
@@ -296,7 +709,6 @@ def detect_access_code_columns(df: pd.DataFrame) -> list[str]:
 
     add(find_column(df, preferred, []))
 
-    # Nuevo campo que la empresa crea manualmente en la encuesta.
     strong_terms = [
         "cree un codigo de acceso",
         "cree un código de acceso",
@@ -308,12 +720,12 @@ def detect_access_code_columns(df: pd.DataFrame) -> list[str]:
         "necesario tener este codigo",
         "necesario tener este código",
     ]
+    strong_terms_norm = [norm_text(x) for x in strong_terms]
     for col in df.columns:
         col_norm = norm_text(col)
-        if any(term in col_norm for term in [norm_text(x) for x in strong_terms]):
+        if any(term in col_norm for term in strong_terms_norm):
             add(col)
 
-    # Fallbacks técnicos si no existe el campo nuevo o si se quiere validar con IDs anteriores.
     for col in df.columns:
         col_norm = norm_text(col)
         if col_norm in {"codigo", "código", "codigo_acceso", "codigo acceso", "_id", "uuid", "meta/instanceid", "instanceid"}:
@@ -323,14 +735,6 @@ def detect_access_code_columns(df: pd.DataFrame) -> list[str]:
 
 
 def normalize_access_code(value: Any) -> str:
-    """Normaliza códigos para comparar sin errores por Excel/KOBO.
-
-    Casos que corrige:
-    - 793682208 vs 793682208.0
-    - espacios, saltos de línea, NBSP y caracteres invisibles
-    - comillas pegadas al copiar/pegar
-    - diferencias de mayúsculas/minúsculas
-    """
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return ""
     text = str(value)
@@ -339,7 +743,6 @@ def normalize_access_code(value: Any) -> str:
     text = text.replace("\xa0", " ").strip().strip('"').strip("'").strip()
     text = re.sub(r"\s+", "", text)
 
-    # Excel o pandas pueden convertir un código numérico a decimal o notación científica.
     numeric_like = text.replace(",", ".")
     if re.fullmatch(r"\d+\.0+", numeric_like):
         numeric_like = numeric_like.split(".", 1)[0]
@@ -349,7 +752,6 @@ def normalize_access_code(value: Any) -> str:
         except Exception:
             pass
     text = numeric_like
-
     return text.upper()
 
 
@@ -380,7 +782,6 @@ def parse_date(value: Any) -> str:
     text = str(value).strip()
     if not text:
         return "Sin fecha"
-    # Excel serial date.
     try:
         number = float(text)
         if 20000 <= number <= 60000:
@@ -388,7 +789,6 @@ def parse_date(value: Any) -> str:
             return date.strftime("%d/%m/%Y")
     except Exception:
         pass
-    # ISO-ish date.
     try:
         date = pd.to_datetime(text, errors="coerce")
         if pd.notna(date):
@@ -406,7 +806,6 @@ def parse_score(value: Any) -> float | None:
         return None
     lowered = norm_text(raw)
 
-    # Text like "Avance calculado: 50%".
     percent_match = re.search(r"(-?\d+(?:[\.,]\d+)?)\s*%", raw)
     if percent_match:
         try:
@@ -414,15 +813,14 @@ def parse_score(value: Any) -> float | None:
         except Exception:
             pass
 
-    # Numbers inside 0-5 or 0-100.
     numeric = re.findall(r"-?\d+(?:[\.,]\d+)?", raw)
     if numeric:
         try:
             n = float(numeric[0].replace(",", "."))
-            if 0 <= n <= 5:
-                return n * 20.0
             if 0 <= n <= 100:
                 return n
+            if 0 <= n <= 5:
+                return n * 20.0
         except Exception:
             pass
 
@@ -430,6 +828,17 @@ def parse_score(value: Any) -> float | None:
         if phrase in lowered:
             return score_0_5 * 20.0
     return None
+
+
+def parse_level(value: Any, fallback_score: float | None = None) -> str:
+    if value is not None and not pd.isna(value):
+        text = str(value).strip()
+        if text:
+            # Respeta niveles calculados por KOBO, pero simplifica etiqueta crítica.
+            if norm_text(text) == "brecha critica":
+                return "Crítico"
+            return text
+    return level_from_score(fallback_score)
 
 
 def level_from_score(score: float | None) -> str:
@@ -519,40 +928,52 @@ def average_scores_from_cols(row: pd.Series, cols: list[str]) -> float | None:
     return float(np.mean(values))
 
 
-def score_by_keywords(row: pd.Series, df: pd.DataFrame, keywords: Iterable[str]) -> float | None:
-    cols = relevant_cols(df, keywords)
+def direct_score(row: pd.Series, df: pd.DataFrame, field_name: str) -> float | None:
+    return parse_score(get_field_value(row, df, field_name))
+
+
+def direct_level(row: pd.Series, df: pd.DataFrame, field_name: str, fallback_score: float | None = None) -> str:
+    return parse_level(get_field_value(row, df, field_name), fallback_score)
+
+
+def direct_text(row: pd.Series, df: pd.DataFrame, field_name: str, fallback: str = "") -> str:
+    value = get_field_value(row, df, field_name)
+    if value is None or pd.isna(value) or str(value).strip() == "":
+        return fallback
+    return str(value).strip()
+
+
+def indicator_score(row: pd.Series, df: pd.DataFrame, indicator_id: int) -> float | None:
+    meta = INDICATORS[indicator_id]
+    score = direct_score(row, df, meta["score_field"])
+    if score is not None:
+        return score
+
+    # Respaldo por número de indicador o etiqueta si el export no trae calculate.
+    keys = [f"indicador {indicator_id}", f"inf_ind_{indicator_id:03d}", meta["title"][:70]]
+    cols = relevant_cols(df, keys)
     return average_scores_from_cols(row, cols)
 
 
 def objective_score(row: pd.Series, df: pd.DataFrame, objective_id: int) -> float | None:
     meta = OBJECTIVES[objective_id]
-    direct = score_by_keywords(row, df, meta["keywords"])
-    if direct is not None:
-        return direct
+    score = direct_score(row, df, meta["score_field"])
+    if score is not None:
+        return score
 
-    # Fallback by indicator numbers in column labels.
-    indicator_tokens = re.findall(r"\d+", meta["indicators"])
-    indicator_keywords = []
-    for token in indicator_tokens:
-        indicator_keywords.extend([f"indicador {token}", f"indicadores {token}", f"weps-tv {token.zfill(2)}", f"weps {token.zfill(2)}"])
-    return score_by_keywords(row, df, indicator_keywords)
+    scores = [indicator_score(row, df, i) for i in meta["indicators"]]
+    scores = [s for s in scores if s is not None]
+    return float(np.mean(scores)) if scores else None
 
 
 def principle_score(row: pd.Series, df: pd.DataFrame, principle_id: int, objective_scores: dict[int, float | None]) -> float | None:
-    direct = score_by_keywords(
-        row,
-        df,
-        [
-            f"principio weps {principle_id}",
-            f"resultado del principio weps {principle_id}",
-            f"weps {principle_id}",
-            f"weps 0{principle_id}",
-        ],
-    )
-    if direct is not None:
-        return direct
+    meta = next((p for p in PRINCIPLES if p["id"] == principle_id), None)
+    if meta:
+        score = direct_score(row, df, meta["score_field"])
+        if score is not None:
+            return score
 
-    objective_ids = next((p["objectives"] for p in PRINCIPLES if p["id"] == principle_id), [])
+    objective_ids = meta["objectives"] if meta else []
     scores = [objective_scores.get(i) for i in objective_ids if objective_scores.get(i) is not None]
     if scores:
         return float(np.mean(scores))
@@ -584,7 +1005,7 @@ def render_header() -> None:
     st.caption(f"Versión: {APP_VERSION}")
     st.write(
         "Consulta pública de resultados agregados y acceso individual por empresa mediante código. "
-        "La lectura se organiza por principios WEPs, objetivos, indicadores y acciones sugeridas para el plan."
+        "La lectura se organiza por los 7 principios WEPs, 13 objetivos, 48 indicadores y acciones sugeridas para el plan."
     )
 
 
@@ -604,7 +1025,6 @@ def render_company_view(df: pd.DataFrame, company_col: str | None, code_col: str
         st.error("No se detectó ninguna columna de código de acceso. Revise que el formulario exporte el campo 'Código de acceso'.")
         return
 
-    # Construir lista de empresas preservando el nombre visible, pero agrupando por versión normalizada.
     visible_by_norm: dict[str, str] = {}
     for value in df[company_col].dropna().astype(str):
         if value.strip():
@@ -656,6 +1076,29 @@ def render_company_view(df: pd.DataFrame, company_col: str | None, code_col: str
     render_result(row, df, selected_company)
 
 
+def render_indicator_table(row: pd.Series, df: pd.DataFrame, indicator_ids: list[int]) -> None:
+    table_rows = []
+    for iid in indicator_ids:
+        meta = INDICATORS[iid]
+        score = indicator_score(row, df, iid)
+        level = direct_level(row, df, meta["level_field"], score)
+        table_rows.append(
+            {
+                "Indicador": iid,
+                "Nombre": meta["title"],
+                "Avance": score_display(score),
+                "Nivel": level,
+                "WEPS / TV / #": meta["ref"],
+                "Metodología": meta["method"],
+            }
+        )
+
+    if table_rows:
+        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("Este objetivo no tiene indicadores vinculados en la matriz cargada.")
+
+
 def render_result(row: pd.Series, df: pd.DataFrame, company_name: str) -> None:
     objective_scores = {obj_id: objective_score(row, df, obj_id) for obj_id in OBJECTIVES}
     principle_scores = {p["id"]: principle_score(row, df, p["id"], objective_scores) for p in PRINCIPLES}
@@ -679,7 +1122,7 @@ def render_result(row: pd.Series, df: pd.DataFrame, company_name: str) -> None:
 
     left, right = st.columns([0.8, 1.4])
     with left:
-        st.plotly_chart(donut(total, "Avance general", height=250), use_container_width=True, config={"displayModeBar": False}, key="donut_avance_general")
+        st.plotly_chart(donut(total, "Avance general", height=250), use_container_width=True, config=CHART_CONFIG, key="donut_avance_general")
     with right:
         p_data = pd.DataFrame(
             {
@@ -687,44 +1130,64 @@ def render_result(row: pd.Series, df: pd.DataFrame, company_name: str) -> None:
                 "Avance": [0 if score is None else score for score in principle_scores.values()],
             }
         )
-        fig = go.Figure(go.Bar(x=p_data["Avance"], y=p_data["Principio"], orientation="h", marker_color=[color_from_score(v) for v in p_data["Avance"]], text=[f"{v:.1f}%" for v in p_data["Avance"]], textposition="auto"))
-        fig.update_layout(height=280, margin=dict(l=10, r=10, t=20, b=20), xaxis=dict(range=[0, 100], title="Avance (%)"), yaxis=dict(autorange="reversed"), showlegend=False)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="bar_principios_empresa")
+        fig = go.Figure(
+            go.Bar(
+                x=p_data["Avance"],
+                y=p_data["Principio"],
+                orientation="h",
+                marker_color=[color_from_score(v) for v in p_data["Avance"]],
+                text=[f"{v:.1f}%" for v in p_data["Avance"]],
+                textposition="auto",
+                hoverinfo="skip",
+            )
+        )
+        fig.update_layout(
+            height=330,
+            margin=dict(l=10, r=10, t=20, b=20),
+            xaxis=dict(range=[0, 100], title="Avance (%)", fixedrange=True),
+            yaxis=dict(autorange="reversed", fixedrange=True),
+            showlegend=False,
+            dragmode=False,
+        )
+        st.plotly_chart(fig, use_container_width=True, config=CHART_CONFIG, key="bar_principios_empresa")
 
     st.subheader("Principios, objetivos e indicadores para el plan")
+    st.caption("Los indicadores se muestran en el orden lógico del XLSForm: 7 principios WEPs, 13 objetivos y 48 indicadores.")
+
     for p in PRINCIPLES:
         pid = p["id"]
         p_score = principle_scores.get(pid)
         with st.expander(f"» » E.1.{pid}. Principio WEPs {pid}: {p['title']}", expanded=True):
             col_a, col_b, col_c = st.columns([0.75, 1, 1.3])
             with col_a:
-                st.plotly_chart(donut(p_score, "Avance del principio", height=210), use_container_width=True, config={"displayModeBar": False}, key=f"donut_principio_{pid}")
+                st.plotly_chart(donut(p_score, "Avance del principio", height=210), use_container_width=True, config=CHART_CONFIG, key=f"donut_principio_{pid}")
             with col_b:
                 st.metric("Avance calculado", score_display(p_score))
-                st.metric("Nivel", level_from_score(p_score))
+                st.metric("Nivel", direct_level(row, df, p["level_field"], p_score))
                 st.progress(0 if p_score is None else int(max(0, min(100, p_score))))
             with col_c:
                 st.write("Documentos de apoyo:")
                 st.write(p["documents"])
                 st.write("Lectura para plan:")
-                st.info(p["reading"])
+                st.info(direct_text(row, df, p["reading_field"], p["reading"]))
 
             for objective_id in p["objectives"]:
                 meta = OBJECTIVES[objective_id]
                 o_score = objective_scores.get(objective_id)
                 with st.container(border=True):
-                    oc1, oc2 = st.columns([0.23, 1])
+                    oc1, oc2 = st.columns([0.22, 1])
                     with oc1:
-                        st.plotly_chart(donut(o_score, "", height=150), use_container_width=True, config={"displayModeBar": False}, key=f"donut_principio_{pid}_objetivo_{objective_id}")
+                        st.plotly_chart(donut(o_score, "", height=150), use_container_width=True, config=CHART_CONFIG, key=f"donut_principio_{pid}_objetivo_{objective_id}")
                     with oc2:
                         st.markdown(f"### » » E.2.{objective_id}. Objetivo {objective_id}: {meta['title']}")
-                        st.write(f"Principios WEPs/TV vinculados: {', '.join([f'WEPs {x}' for x in [pid]])}")
+                        st.caption(meta.get("linked", ""))
                         cc1, cc2 = st.columns(2)
                         cc1.metric("Avance calculado", score_display(o_score))
-                        cc2.metric("Nivel", level_from_score(o_score))
+                        cc2.metric("Nivel", direct_level(row, df, meta["level_field"], o_score))
                         st.write("Lectura para plan:")
-                        st.success(meta["reading"])
-                        st.caption(f"Indicadores que sustentan este objetivo: {meta['indicators']}")
+                        st.success(direct_text(row, df, meta["reading_field"], meta["reading"]))
+                        st.write("Indicadores que sustentan este objetivo:")
+                        render_indicator_table(row, df, meta["indicators"])
 
 
 def render_public_summary(df: pd.DataFrame, company_col: str | None) -> None:
@@ -754,8 +1217,23 @@ def render_diagnostics(df: pd.DataFrame, company_col: str | None, code_col: str 
     st.write(f"Columna empresa detectada: {company_col}")
     st.write(f"Columna código principal detectada: {code_col}")
     st.write(f"Todas las columnas posibles de código: {detect_access_code_columns(df)}")
+
+    score_fields = [p["score_field"] for p in PRINCIPLES] + [o["score_field"] for o in OBJECTIVES.values()] + [i["score_field"] for i in INDICATORS.values()]
+    found = []
+    missing = []
+    for field in score_fields:
+        col = find_field_column(df, field)
+        if col:
+            found.append({"campo esperado": field, "columna encontrada": col})
+        else:
+            missing.append({"campo esperado": field})
+    st.write("Campos de cálculo encontrados:")
+    st.dataframe(pd.DataFrame(found), use_container_width=True, hide_index=True)
+    st.write("Campos de cálculo no encontrados:")
+    st.dataframe(pd.DataFrame(missing), use_container_width=True, hide_index=True)
+
     st.write("Primeras columnas detectadas:")
-    st.dataframe(pd.DataFrame({"columna": list(df.columns)[:80]}), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame({"columna": list(df.columns)[:120]}), use_container_width=True, hide_index=True)
 
 
 def main() -> None:
