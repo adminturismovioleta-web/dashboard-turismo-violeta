@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v14 código robusto KOBO"
+APP_VERSION = "v15 corrección gráficos duplicados"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -679,7 +679,7 @@ def render_result(row: pd.Series, df: pd.DataFrame, company_name: str) -> None:
 
     left, right = st.columns([0.8, 1.4])
     with left:
-        st.plotly_chart(donut(total, "Avance general", height=250), use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(donut(total, "Avance general", height=250), use_container_width=True, config={"displayModeBar": False}, key="donut_avance_general")
     with right:
         p_data = pd.DataFrame(
             {
@@ -689,7 +689,7 @@ def render_result(row: pd.Series, df: pd.DataFrame, company_name: str) -> None:
         )
         fig = go.Figure(go.Bar(x=p_data["Avance"], y=p_data["Principio"], orientation="h", marker_color=[color_from_score(v) for v in p_data["Avance"]], text=[f"{v:.1f}%" for v in p_data["Avance"]], textposition="auto"))
         fig.update_layout(height=280, margin=dict(l=10, r=10, t=20, b=20), xaxis=dict(range=[0, 100], title="Avance (%)"), yaxis=dict(autorange="reversed"), showlegend=False)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="bar_principios_empresa")
 
     st.subheader("Principios, objetivos e indicadores para el plan")
     for p in PRINCIPLES:
@@ -698,7 +698,7 @@ def render_result(row: pd.Series, df: pd.DataFrame, company_name: str) -> None:
         with st.expander(f"» » E.1.{pid}. Principio WEPs {pid}: {p['title']}", expanded=True):
             col_a, col_b, col_c = st.columns([0.75, 1, 1.3])
             with col_a:
-                st.plotly_chart(donut(p_score, "Avance del principio", height=210), use_container_width=True, config={"displayModeBar": False})
+                st.plotly_chart(donut(p_score, "Avance del principio", height=210), use_container_width=True, config={"displayModeBar": False}, key=f"donut_principio_{pid}")
             with col_b:
                 st.metric("Avance calculado", score_display(p_score))
                 st.metric("Nivel", level_from_score(p_score))
@@ -715,7 +715,7 @@ def render_result(row: pd.Series, df: pd.DataFrame, company_name: str) -> None:
                 with st.container(border=True):
                     oc1, oc2 = st.columns([0.23, 1])
                     with oc1:
-                        st.plotly_chart(donut(o_score, "", height=150), use_container_width=True, config={"displayModeBar": False})
+                        st.plotly_chart(donut(o_score, "", height=150), use_container_width=True, config={"displayModeBar": False}, key=f"donut_principio_{pid}_objetivo_{objective_id}")
                     with oc2:
                         st.markdown(f"### » » E.2.{objective_id}. Objetivo {objective_id}: {meta['title']}")
                         st.write(f"Principios WEPs/TV vinculados: {', '.join([f'WEPs {x}' for x in [pid]])}")
