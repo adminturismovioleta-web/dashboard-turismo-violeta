@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v12 KOBO directo limpio"
+APP_VERSION = "v13 KOBO auth fix"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -180,16 +180,45 @@ def get_secret(name: str, default: str = "") -> str:
         return default
 
 
+
+
+def sanitize_kobo_token(raw_token: str) -> str:
+    """Limpia el token de KOBO para evitar errores comunes en Streamlit Secrets."""
+    token = str(raw_token or "").strip().strip('"').strip("'").strip()
+    if token.lower().startswith("token "):
+        token = token.split(" ", 1)[1].strip()
+    if token.lower().startswith("bearer "):
+        token = token.split(" ", 1)[1].strip()
+    match = re.search(r"[A-Fa-f0-9]{32,80}", token)
+    if match:
+        return match.group(0)
+    return token
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_data_from_source(url: str, token: str) -> pd.DataFrame:
     if not url:
         return pd.DataFrame()
 
+    clean_token = sanitize_kobo_token(token)
     headers = {}
-    if token:
-        headers["Authorization"] = f"Token {token}"
+    if clean_token:
+        headers["Authorization"] = f"Token {clean_token}"
 
     response = requests.get(url, headers=headers, timeout=90)
+
+    if response.status_code == 401:
+        raise RuntimeError(
+            "KOBO rechazó la autenticación (401 Unauthorized). Revise que KOBO_TOKEN contenga solo la clave API, "
+            "sin la palabra Token, sin comillas adicionales, sin espacios, y que pertenezca a la cuenta del servidor "
+            "eu.kobotoolbox.org con permiso sobre este formulario."
+        )
+
+    if response.status_code == 403:
+        raise RuntimeError(
+            "KOBO respondió 403 Forbidden. El token existe, pero la cuenta no tiene permisos suficientes sobre este asset/export. "
+            "Comparta el proyecto con esa cuenta o use el token de la cuenta propietaria."
+        )
+
     response.raise_for_status()
     content = response.content
     lower_url = url.lower()
