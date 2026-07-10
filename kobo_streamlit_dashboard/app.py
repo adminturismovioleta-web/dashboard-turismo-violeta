@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v16 indicadores completos y WEPs 1-7"
+APP_VERSION = "v17 indicadores expandidos sin barra horizontal"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -1077,26 +1077,36 @@ def render_company_view(df: pd.DataFrame, company_col: str | None, code_col: str
 
 
 def render_indicator_table(row: pd.Series, df: pd.DataFrame, indicator_ids: list[int]) -> None:
-    table_rows = []
+    """Render indicators as responsive cards instead of a dataframe.
+
+    Streamlit dataframes truncate long text and require manual column resizing or
+    horizontal scrolling. These cards keep every field readable by wrapping the
+    content vertically inside the page width.
+    """
+    if not indicator_ids:
+        st.info("Este objetivo no tiene indicadores vinculados en la matriz cargada.")
+        return
+
     for iid in indicator_ids:
         meta = INDICATORS[iid]
         score = indicator_score(row, df, iid)
         level = direct_level(row, df, meta["level_field"], score)
-        table_rows.append(
-            {
-                "Indicador": iid,
-                "Nombre": meta["title"],
-                "Avance": score_display(score),
-                "Nivel": level,
-                "WEPS / TV / #": meta["ref"],
-                "Metodología": meta["method"],
-            }
-        )
+        score_value = 0 if score is None else int(max(0, min(100, round(float(score)))))
 
-    if table_rows:
-        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
-    else:
-        st.info("Este objetivo no tiene indicadores vinculados en la matriz cargada.")
+        with st.container(border=True):
+            top1, top2, top3, top4 = st.columns([0.16, 0.22, 0.24, 0.38])
+            top1.metric("Indicador", iid)
+            top2.metric("Avance", score_display(score))
+            top3.metric("Nivel", level)
+            top4.write("**WEPS / TV / #**")
+            top4.write(meta["ref"])
+
+            st.progress(score_value)
+            st.write("**Nombre del indicador**")
+            st.write(meta["title"])
+
+            st.write("**Metodología de cálculo / lectura**")
+            st.caption(meta["method"])
 
 
 def render_result(row: pd.Series, df: pd.DataFrame, company_name: str) -> None:
