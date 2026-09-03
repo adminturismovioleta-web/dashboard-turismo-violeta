@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v18.4 mapa Ecuador universal Scattergeo"
+APP_VERSION = "v18 resumen publico y mapa Ecuador"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -577,20 +577,9 @@ def sanitize_kobo_token(raw_token: str) -> str:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_data_from_source(url: str, token: str) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
-    """Carga la exportación de KOBO y conserva las hojas de grupos repetibles.
-
-    KOBO exporta los ``begin_repeat`` a hojas adicionales del XLSX. La versión
-    anterior leía únicamente la primera hoja, por lo que campos como
-    ``provincia_operacion`` dentro de ``localidades_operacion`` no estaban
-    disponibles para el resumen público.
-
-    Devuelve:
-      1. DataFrame principal (primera hoja del libro, como en la versión previa).
-      2. Diccionario con las demás hojas/repeats del XLSX.
-    """
+def load_data_from_source(url: str, token: str) -> pd.DataFrame:
     if not url:
-        return pd.DataFrame(), {}
+        return pd.DataFrame()
 
     clean_token = sanitize_kobo_token(token)
     headers = {}
@@ -615,47 +604,15 @@ def load_data_from_source(url: str, token: str) -> tuple[pd.DataFrame, dict[str,
     response.raise_for_status()
     content = response.content
     lower_url = url.lower()
-    content_type = str(response.headers.get("Content-Type", "")).lower()
 
-    # CSV no puede contener hojas repeat separadas. Se mantiene compatibilidad.
-    if lower_url.endswith(".csv") or "data.csv" in lower_url or "text/csv" in content_type:
+    if lower_url.endswith(".csv") or "data.csv" in lower_url:
         df = pd.read_csv(io.BytesIO(content), dtype=str)
-        df.columns = [clean_col(c) for c in df.columns]
-        df = df.dropna(how="all")
-        return df, {}
+    else:
+        df = pd.read_excel(io.BytesIO(content), dtype=str)
 
-    # En XLSX se leen TODAS las hojas. La primera continúa siendo la tabla principal.
-    try:
-        workbook = pd.read_excel(io.BytesIO(content), sheet_name=None, dtype=str)
-    except Exception:
-        # Respaldo: algunas URLs de exportación no exponen claramente el formato.
-        try:
-            df = pd.read_csv(io.BytesIO(content), dtype=str)
-            df.columns = [clean_col(c) for c in df.columns]
-            df = df.dropna(how="all")
-            return df, {}
-        except Exception as exc:
-            raise RuntimeError("No se pudo interpretar la exportación de KOBO como XLSX ni CSV.") from exc
-
-    cleaned_sheets: dict[str, pd.DataFrame] = {}
-    for sheet_name, sheet_df in workbook.items():
-        cleaned = sheet_df.copy()
-        cleaned.columns = [clean_col(c) for c in cleaned.columns]
-        cleaned = cleaned.dropna(how="all")
-        cleaned_sheets[str(sheet_name)] = cleaned
-
-    if not cleaned_sheets:
-        return pd.DataFrame(), {}
-
-    main_sheet_name = next(iter(cleaned_sheets))
-    main_df = cleaned_sheets[main_sheet_name]
-    repeat_sheets = {
-        name: sheet
-        for name, sheet in cleaned_sheets.items()
-        if name != main_sheet_name
-    }
-
-    return main_df, repeat_sheets
+    df.columns = [clean_col(c) for c in df.columns]
+    df = df.dropna(how="all")
+    return df
 
 
 def find_column(df: pd.DataFrame, preferred: str, candidates: Iterable[str]) -> str | None:
@@ -1441,8 +1398,6 @@ def normalize_province_name(value: Any) -> str:
         return ""
 
     text = norm_text(value)
-    if not text:
-        return ""
 
     aliases = {
         "santo domingo": "santo domingo de los tsachilas",
@@ -1452,8 +1407,7 @@ def normalize_province_name(value: Any) -> str:
         "morona": "morona santiago",
     }
 
-    # Primero se buscan nombres oficiales dentro de valores como
-    # "17 - Pichincha", "ec_17_pichincha" o etiquetas completas.
+    # Se revisan primero los nombres oficiales completos.
     for province in ECUADOR_PROVINCES:
         if province in text:
             return province
@@ -1462,217 +1416,27 @@ def normalize_province_name(value: Any) -> str:
         if alias in text:
             return province
 
-    # Respaldo para formularios que exporten únicamente código INEC 01-24.
-    code_map = {
-        1: "azuay",
-        2: "bolivar",
-        3: "canar",
-        4: "carchi",
-        5: "cotopaxi",
-        6: "chimborazo",
-        7: "el oro",
-        8: "esmeraldas",
-        9: "guayas",
-        10: "imbabura",
-        11: "loja",
-        12: "los rios",
-        13: "manabi",
-        14: "morona santiago",
-        15: "napo",
-        16: "pastaza",
-        17: "pichincha",
-        18: "tungurahua",
-        19: "zamora chinchipe",
-        20: "galapagos",
-        21: "sucumbios",
-        22: "orellana",
-        23: "santo domingo de los tsachilas",
-        24: "santa elena",
-    }
-    code_match = re.fullmatch(r"(?:0?)([1-9]|1[0-9]|2[0-4])", text)
-    if code_match:
-        return code_map.get(int(code_match.group(1)), "")
-
     return ""
 
 
 def detect_province_column(df: pd.DataFrame) -> str | None:
-    """Detecta provincia en una tabla normal o en un repeat ya aplanado."""
     if df.empty:
         return None
 
     preferred = get_secret("PROVINCE_COLUMN", "")
-    if preferred:
-        found = find_column(df, preferred, [])
-        if found:
-            return found
-
-    # Nombres técnicos del XLSForm primero.
-    for field_name in ["provincia_operacion", "provincia_operación", "provincia"]:
-        found = find_field_column(df, field_name)
-        if found:
-            return found
-
-    candidates = []
-    for col in df.columns:
-        col_norm = norm_text(col)
-        if "provincia" not in col_norm:
-            continue
-        sample = df[col].dropna().head(80)
-        valid = sum(bool(normalize_province_name(v)) for v in sample)
-        candidates.append((valid, col))
-
-    if candidates:
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        if candidates[0][0] > 0:
-            return candidates[0][1]
-
-    return None
-
-
-def detect_repeat_province_column(df: pd.DataFrame) -> str | None:
-    """Prioriza específicamente ``provincia_operacion`` dentro de hojas repeat."""
-    if df.empty:
-        return None
-
-    for field_name in ["provincia_operacion", "provincia_operación"]:
-        found = find_field_column(df, field_name)
-        if found:
-            return found
-
-    return detect_province_column(df)
-
-
-def _find_id_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    if df.empty:
-        return None
-    wanted = {norm_id(c) for c in candidates}
-    for col in df.columns:
-        if norm_id(col) in wanted:
-            return col
-    return None
-
-
-def filter_repeat_to_public_records(repeat_df: pd.DataFrame, public_df: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
-    """Filtra un repeat a las observaciones públicas más recientes cuando KOBO exporta llaves padre.
-
-    Si no se encuentra una relación inequívoca se conserva el repeat completo; esto
-    permite seguir mostrando cobertura sin perder datos en variantes de exportación.
-    Devuelve además la columna que identifica al padre, útil para no contar dos
-    localidades de la misma empresa en una misma provincia.
-    """
-    if repeat_df.empty or public_df.empty:
-        return repeat_df.copy(), None
-
-    key_pairs = [
-        (["_parent_index", "parent_index"], ["_index", "index"]),
-        (["parent_key", "_parent_key", "PARENT_KEY"], ["key", "KEY"]),
-        (["_parent_uuid", "parent_uuid"], ["_uuid", "uuid"]),
-        (["_parent_id", "parent_id"], ["_id", "id"]),
-    ]
-
-    for repeat_candidates, main_candidates in key_pairs:
-        repeat_key = _find_id_column(repeat_df, repeat_candidates)
-        main_key = _find_id_column(public_df, main_candidates)
-        if not repeat_key or not main_key:
-            continue
-
-        allowed = {
-            str(v).strip()
-            for v in public_df[main_key].dropna()
-            if str(v).strip()
-        }
-        if not allowed:
-            continue
-
-        filtered = repeat_df[
-            repeat_df[repeat_key].astype(str).str.strip().isin(allowed)
-        ].copy()
-
-        # Si la relación existe pero no devuelve filas, no se fuerza un repeat vacío:
-        # otra variante de exportación puede usar índices de distinto tipo.
-        if not filtered.empty:
-            return filtered, repeat_key
-
-    # Intento adicional para _parent_index numérico vs _index exportado como "1.0".
-    repeat_key = _find_id_column(repeat_df, ["_parent_index", "parent_index"])
-    main_key = _find_id_column(public_df, ["_index", "index"])
-    if repeat_key and main_key:
-        main_numeric = pd.to_numeric(public_df[main_key], errors="coerce").dropna()
-        repeat_numeric = pd.to_numeric(repeat_df[repeat_key], errors="coerce")
-        if not main_numeric.empty:
-            filtered = repeat_df[repeat_numeric.isin(set(main_numeric.tolist()))].copy()
-            if not filtered.empty:
-                return filtered, repeat_key
-
-    return repeat_df.copy(), None
-
-
-def province_counts_from_repeat_sheets(
-    repeat_sheets: dict[str, pd.DataFrame],
-    public_df: pd.DataFrame,
-) -> tuple[pd.DataFrame, list[str]]:
-    """Construye cobertura provincial a partir de todos los repeats de KOBO.
-
-    Busca hojas que contengan ``provincia_operacion``. Cuando existe una llave de
-    relación padre, cuenta una sola vez cada provincia por encuesta/empresa aun si
-    se registraron varias localidades dentro de la misma provincia.
-    """
-    empty = pd.DataFrame(columns=["province_key", "Provincia", "Registros", "lat", "lon"])
-    if not repeat_sheets:
-        return empty, []
-
-    rows: list[pd.DataFrame] = []
-    used_sheets: list[str] = []
-
-    for sheet_name, sheet_df in repeat_sheets.items():
-        if sheet_df.empty:
-            continue
-
-        province_col = detect_repeat_province_column(sheet_df)
-        if not province_col:
-            continue
-
-        normalized = sheet_df[province_col].apply(normalize_province_name)
-        if not (normalized != "").any():
-            continue
-
-        filtered, parent_col = filter_repeat_to_public_records(sheet_df, public_df)
-        normalized = filtered[province_col].apply(normalize_province_name)
-        tmp = pd.DataFrame({"province_key": normalized})
-        tmp = tmp[tmp["province_key"] != ""].copy()
-        if tmp.empty:
-            continue
-
-        if parent_col and parent_col in filtered.columns:
-            tmp["__parent"] = filtered.loc[tmp.index, parent_col].astype(str).str.strip()
-            tmp = tmp.drop_duplicates(subset=["__parent", "province_key"])
-        else:
-            # Sin llave padre, se conserva cada localidad válida como registro territorial.
-            tmp["__parent"] = ""
-
-        tmp["__sheet"] = str(sheet_name)
-        rows.append(tmp)
-        used_sheets.append(str(sheet_name))
-
-    if not rows:
-        return empty, []
-
-    combined = pd.concat(rows, ignore_index=True)
-    counts = (
-        combined["province_key"]
-        .value_counts()
-        .rename_axis("province_key")
-        .reset_index(name="Registros")
+    return find_column(
+        df,
+        preferred,
+        [
+            "provincia donde",
+            "provincia de ubicación",
+            "provincia de ubicacion",
+            "provincia",
+        ],
     )
-    counts["Provincia"] = counts["province_key"].map(PROVINCE_DISPLAY)
-    counts["lat"] = counts["province_key"].apply(lambda x: ECUADOR_PROVINCES[x][0])
-    counts["lon"] = counts["province_key"].apply(lambda x: ECUADOR_PROVINCES[x][1])
-    return counts, used_sheets
 
 
 def detect_geopoint_column(df: pd.DataFrame) -> str | None:
-    """Selecciona la columna que realmente contiene coordenadas, no solo una etiqueta con 'GPS'."""
     if df.empty:
         return None
 
@@ -1697,33 +1461,12 @@ def detect_geopoint_column(df: pd.DataFrame) -> str | None:
     ]
     terms_norm = [norm_text(term) for term in terms]
 
-    candidates: list[tuple[int, int, str]] = []
     for col in df.columns:
         col_norm = norm_text(col)
-        col_id = norm_id(col)
-        if not any(term in col_norm for term in terms_norm) and "geopoint" not in col_id:
-            continue
+        if any(term in col_norm for term in terms_norm):
+            return col
 
-        sample = df[col].dropna().head(100)
-        valid_coords = 0
-        for value in sample:
-            lat, lon = parse_ecuador_coordinates(value)
-            if lat is not None and lon is not None:
-                valid_coords += 1
-
-        name_bonus = 0
-        if col_id == "geopoint" or col_id.endswith("geopoint"):
-            name_bonus += 3
-        if "georeferenciaciondeladireccion" in col_id or "georreferenciaciondeladireccion" in col_id:
-            name_bonus += 2
-
-        candidates.append((valid_coords, name_bonus, col))
-
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    return candidates[0][2]
+    return None
 
 
 def detect_lat_lon_columns(df: pd.DataFrame) -> tuple[str | None, str | None]:
@@ -1971,39 +1714,24 @@ def public_georeferenced_points(public_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def public_map_figure(province_df: pd.DataFrame, geo_df: pd.DataFrame) -> go.Figure:
-    """Mapa público de Ecuador compatible con cualquier Plotly moderno.
-
-    Usa exclusivamente ``go.Scattergeo`` para evitar las incompatibilidades
-    entre ``Scattermapbox`` (retirado) y ``Scattermap`` (dependiente de la
-    versión instalada). No requiere token de Mapbox ni teselas externas.
-    """
     fig = go.Figure()
 
     if not province_df.empty:
         max_count = max(float(province_df["Registros"].max()), 1.0)
-        province_sizes = 16 + (province_df["Registros"].astype(float) / max_count) * 26
+        province_sizes = 18 + (province_df["Registros"].astype(float) / max_count) * 28
 
         fig.add_trace(
-            go.Scattergeo(
+            go.Scattermapbox(
                 lat=province_df["lat"],
                 lon=province_df["lon"],
-                mode="markers+text",
-                name="Cobertura por provincia",
-                marker=dict(
-                    size=province_sizes.tolist(),
-                    color="#7144C6",
-                    opacity=0.84,
-                    line=dict(width=1, color="#FFFFFF"),
-                ),
-                text=[str(int(v)) for v in province_df["Registros"]],
-                textfont=dict(color="#FFFFFF", size=11),
-                textposition="middle center",
-                customdata=province_df[["Provincia", "Registros"]].values,
-                hovertemplate=(
-                    "<b>%{customdata[0]}</b><br>"
-                    "%{customdata[1]} registro(s) territorial(es)"
-                    "<extra></extra>"
-                ),
+                mode="markers",
+                name="Empresas por provincia",
+                marker=dict(size=province_sizes, color="#7144C6", opacity=0.82),
+                text=[
+                    f"<b>{prov}</b><br>{int(count)} empresa{'s' if int(count) != 1 else ''}"
+                    for prov, count in zip(province_df["Provincia"], province_df["Registros"])
+                ],
+                hovertemplate="%{text}<extra></extra>",
             )
         )
 
@@ -2018,58 +1746,36 @@ def public_map_figure(province_df: pd.DataFrame, geo_df: pd.DataFrame) -> go.Fig
             )
 
         fig.add_trace(
-            go.Scattergeo(
+            go.Scattermapbox(
                 lat=geo_df["lat"],
                 lon=geo_df["lon"],
                 mode="markers",
                 name="Georreferencias",
-                marker=dict(
-                    size=10,
-                    color="#F47948",
-                    opacity=0.95,
-                    symbol="circle",
-                    line=dict(width=1, color="#FFFFFF"),
-                ),
+                marker=dict(size=10, color="#F47948", opacity=0.92),
                 text=hover_text,
                 hovertemplate="%{text}<extra></extra>",
             )
         )
 
-    fig.update_geos(
-        projection_type="mercator",
-        showland=True,
-        landcolor="#F5F3EE",
-        showocean=True,
-        oceancolor="#DFF3FA",
-        showlakes=True,
-        lakecolor="#DFF3FA",
-        showcountries=True,
-        countrycolor="#7C8491",
-        countrywidth=1.2,
-        showcoastlines=True,
-        coastlinecolor="#7C8491",
-        coastlinewidth=1.0,
-        lonaxis=dict(range=[-81.7, -74.8], showgrid=False),
-        lataxis=dict(range=[-5.3, 1.8], showgrid=False),
-        bgcolor="rgba(0,0,0,0)",
-        fitbounds=False,
-    )
-
     fig.update_layout(
         height=470,
         margin=dict(l=0, r=0, t=0, b=0),
-        paper_bgcolor="rgba(0,0,0,0)",
+        mapbox=dict(
+            style="open-street-map",
+            center=dict(lat=-1.45, lon=-78.25),
+            zoom=5.25,
+        ),
         legend=dict(
             orientation="h",
             yanchor="bottom",
             y=0.01,
             xanchor="left",
             x=0.01,
-            bgcolor="rgba(255,255,255,0.88)",
+            bgcolor="rgba(255,255,255,0.85)",
         ),
     )
-
     return fig
+
 
 def public_weps_figure(principle_scores: dict[int, float | None]) -> go.Figure:
     labels = []
@@ -2139,11 +1845,7 @@ def public_levels_figure(level_counts: dict[str, int]) -> go.Figure:
     return fig
 
 
-def render_public_summary(
-    df: pd.DataFrame,
-    company_col: str | None,
-    repeat_sheets: dict[str, pd.DataFrame] | None = None,
-) -> None:
+def render_public_summary(df: pd.DataFrame, company_col: str | None) -> None:
     public_css()
 
     # Para resultados institucionales se conserva la observación más reciente
@@ -2153,17 +1855,8 @@ def render_public_summary(
     total_score, principle_scores, company_scores = calculate_public_scores(public_df)
     general_level = level_from_score(total_score)
 
-    # La cobertura territorial se toma primero del repeat ``localidades_operacion``.
-    # Si el export no incluye hojas repeat, se usa la provincia disponible en la tabla principal.
-    repeat_sheets = repeat_sheets or {}
-    province_df, province_repeat_sheets = province_counts_from_repeat_sheets(repeat_sheets, public_df)
-    province_source = "repeat" if not province_df.empty else "main"
-
-    if province_df.empty:
-        province_col = detect_province_column(public_df)
-        province_df = public_province_counts(public_df, province_col)
-
-    # Los puntos exactos se toman de la georreferenciación 5.1 de la tabla principal.
+    province_col = detect_province_column(public_df)
+    province_df = public_province_counts(public_df, province_col)
     geo_df = public_georeferenced_points(public_df)
 
     companies = (
@@ -2297,7 +1990,7 @@ def render_public_summary(
         """
         <div class="tv-card-title">Cobertura territorial y georreferenciación</div>
         <div class="tv-section-caption">
-            Provincias declaradas en las localidades de operación y puntos GPS registrados en KOBO.
+            Distribución territorial de las empresas y registros disponibles en KOBO.
         </div>
         """,
         unsafe_allow_html=True,
@@ -2322,7 +2015,7 @@ def render_public_summary(
         st.markdown(
             """
             <div class="tv-card">
-                <div class="tv-card-title">Provincias con mayor presencia registrada</div>
+                <div class="tv-card-title">Provincias con más empresas</div>
             """,
             unsafe_allow_html=True,
         )
@@ -2345,21 +2038,11 @@ def render_public_summary(
         else:
             st.caption("Sin información provincial disponible.")
 
-        if province_source == "repeat" and province_repeat_sheets:
-            st.markdown(
-                f"""
-                <div style="margin-top:15px; color:#767b8c; font-size:0.82rem;">
-                    Cobertura obtenida de localidades de operación registradas en KOBO.
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
         if not geo_df.empty:
             st.markdown(
                 f"""
-                <div style="margin-top:10px; color:#767b8c; font-size:0.82rem;">
-                    📍 {len(geo_df)} empresas cuentan con coordenadas geográficas válidas.
+                <div style="margin-top:15px; color:#767b8c; font-size:0.82rem;">
+                    📍 {len(geo_df)} registros cuentan con coordenadas geográficas.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -2412,12 +2095,7 @@ def render_public_summary(
     )
 
 
-def render_diagnostics(
-    df: pd.DataFrame,
-    company_col: str | None,
-    code_col: str | None,
-    repeat_sheets: dict[str, pd.DataFrame] | None = None,
-) -> None:
+def render_diagnostics(df: pd.DataFrame, company_col: str | None, code_col: str | None) -> None:
     st.subheader("Diagnóstico técnico")
     password = st.text_input("Clave de administrador", type="password")
     if password != get_secret("ADMIN_PASSWORD", "TurismoVioleta2026"):
@@ -2430,22 +2108,6 @@ def render_diagnostics(
     st.write(f"Columna empresa detectada: {company_col}")
     st.write(f"Columna código principal detectada: {code_col}")
     st.write(f"Todas las columnas posibles de código: {detect_access_code_columns(df)}")
-
-    repeat_sheets = repeat_sheets or {}
-    st.write(f"Hojas repeat detectadas: {list(repeat_sheets.keys()) if repeat_sheets else 'Ninguna'}")
-    if repeat_sheets:
-        repeat_debug = []
-        for sheet_name, sheet_df in repeat_sheets.items():
-            repeat_debug.append(
-                {
-                    "hoja": sheet_name,
-                    "filas": len(sheet_df),
-                    "columnas": len(sheet_df.columns),
-                    "provincia detectada": detect_repeat_province_column(sheet_df),
-                }
-            )
-        st.write("Diagnóstico de hojas repeat:")
-        st.dataframe(pd.DataFrame(repeat_debug), use_container_width=True, hide_index=True)
 
     score_fields = [p["score_field"] for p in PRINCIPLES] + [o["score_field"] for o in OBJECTIVES.values()] + [i["score_field"] for i in INDICATORS.values()]
     found = []
@@ -2477,7 +2139,7 @@ def main() -> None:
 
     try:
         with st.spinner("Cargando datos desde KOBO..."):
-            df, repeat_sheets = load_data_from_source(url, token)
+            df = load_data_from_source(url, token)
     except Exception as exc:
         st.error("No se pudo cargar la fuente de datos de KOBO.")
         st.exception(exc)
@@ -2494,9 +2156,9 @@ def main() -> None:
     with tab1:
         render_company_view(df, company_col, code_col)
     with tab2:
-        render_public_summary(df, company_col, repeat_sheets)
+        render_public_summary(df, company_col)
     with tab3:
-        render_diagnostics(df, company_col, code_col, repeat_sheets)
+        render_diagnostics(df, company_col, code_col)
 
 
 if __name__ == "__main__":
