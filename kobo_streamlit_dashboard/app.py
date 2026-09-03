@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v18.6 mapa Ecuador profesional Esri Leaflet"
+APP_VERSION = "v18.7 Leaflet estable navegación condicional"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -2319,7 +2319,6 @@ def render_professional_ecuador_map(
             }});
 
             esriTopo.addTo(map);
-            map.fitBounds(mainlandBounds, {{padding: [8, 8]}});
 
             L.control.zoom({{position: 'topright'}}).addTo(map);
             L.control.scale({{position: 'bottomright', imperial: false}}).addTo(map);
@@ -2492,9 +2491,51 @@ def render_professional_ecuador_map(
                 map.scrollWheelZoom.disable();
             }});
 
-            // Corrige tamaño tras cargar el iframe de Streamlit.
-            setTimeout(() => map.invalidateSize(), 250);
-            setTimeout(() => map.invalidateSize(), 800);
+            // --------------------------------------------------------
+            // SINCRONIZACIÓN DEL TAMAÑO CON STREAMLIT
+            // --------------------------------------------------------
+            // Leaflet debe calcular el tamaño solo después de que el iframe
+            // tenga sus dimensiones finales. ResizeObserver mantiene el mapa
+            // sincronizado si cambia el ancho de la página o de la columna.
+            let initialViewApplied = false;
+
+            function refreshMapSize(applyInitialView = false) {{
+                requestAnimationFrame(() => {{
+                    map.invalidateSize({{animate: false, pan: false}});
+
+                    if (applyInitialView && !initialViewApplied) {{
+                        initialViewApplied = true;
+                        map.fitBounds(mainlandBounds, {{
+                            padding: [22, 22],
+                            animate: false
+                        }});
+                    }}
+                }});
+            }}
+
+            const mapWrap = document.getElementById('map-wrap');
+
+            if (window.ResizeObserver && mapWrap) {{
+                const resizeObserver = new ResizeObserver(() => {{
+                    refreshMapSize(false);
+                }});
+                resizeObserver.observe(mapWrap);
+            }}
+
+            window.addEventListener('resize', () => refreshMapSize(false));
+            window.addEventListener('load', () => refreshMapSize(true));
+
+            // Varias pasadas cubren el montaje inicial del componente de Streamlit
+            // y la carga de fuentes/controles sin depender de una pestaña oculta.
+            setTimeout(() => refreshMapSize(true), 80);
+            setTimeout(() => refreshMapSize(true), 300);
+            setTimeout(() => refreshMapSize(false), 900);
+            setTimeout(() => refreshMapSize(false), 1600);
+
+            // Recalcula también cuando las teselas base terminan de cargarse.
+            esriTopo.on('load', () => refreshMapSize(false));
+            esriStreet.on('load', () => refreshMapSize(false));
+            osm.on('load', () => refreshMapSize(false));
         </script>
     </body>
     </html>
@@ -2925,12 +2966,41 @@ def main() -> None:
     company_col = detect_company_column(df)
     code_col = detect_access_code_column(df)
 
-    tab1, tab2, tab3 = st.tabs(["Consulta por empresa", "Resumen público", "Diagnóstico técnico"])
-    with tab1:
+    # Navegación condicional: solo se renderiza la sección visible.
+    # Esto evita inicializar componentes HTML/Leaflet dentro de pestañas ocultas,
+    # que era la causa de las teselas incompletas o desalineadas del mapa.
+    st.markdown(
+        """
+        <style>
+        div[role="radiogroup"] {
+            gap: 0.25rem;
+            border-bottom: 1px solid #e7e7ec;
+            padding-bottom: 0.15rem;
+            margin-bottom: 1.2rem;
+        }
+        div[role="radiogroup"] label {
+            background: transparent;
+            padding: 0.42rem 0.72rem;
+            border-radius: 8px 8px 0 0;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    section = st.radio(
+        "Navegación principal",
+        ["Consulta por empresa", "Resumen público", "Diagnóstico técnico"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="main_navigation",
+    )
+
+    if section == "Consulta por empresa":
         render_company_view(df, company_col, code_col)
-    with tab2:
+    elif section == "Resumen público":
         render_public_summary(df, company_col, repeat_sheets)
-    with tab3:
+    else:
         render_diagnostics(df, company_col, code_col, repeat_sheets)
 
 
