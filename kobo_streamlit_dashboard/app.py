@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 import unicodedata
 from datetime import datetime, timedelta
@@ -12,7 +13,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v18 resumen publico y mapa Ecuador"
+APP_VERSION = "v18.5 mapa Ecuador profesional Leaflet"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -577,9 +578,20 @@ def sanitize_kobo_token(raw_token: str) -> str:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_data_from_source(url: str, token: str) -> pd.DataFrame:
+def load_data_from_source(url: str, token: str) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Carga la exportación de KOBO y conserva las hojas de grupos repetibles.
+
+    KOBO exporta los ``begin_repeat`` a hojas adicionales del XLSX. La versión
+    anterior leía únicamente la primera hoja, por lo que campos como
+    ``provincia_operacion`` dentro de ``localidades_operacion`` no estaban
+    disponibles para el resumen público.
+
+    Devuelve:
+      1. DataFrame principal (primera hoja del libro, como en la versión previa).
+      2. Diccionario con las demás hojas/repeats del XLSX.
+    """
     if not url:
-        return pd.DataFrame()
+        return pd.DataFrame(), {}
 
     clean_token = sanitize_kobo_token(token)
     headers = {}
@@ -604,15 +616,47 @@ def load_data_from_source(url: str, token: str) -> pd.DataFrame:
     response.raise_for_status()
     content = response.content
     lower_url = url.lower()
+    content_type = str(response.headers.get("Content-Type", "")).lower()
 
-    if lower_url.endswith(".csv") or "data.csv" in lower_url:
+    # CSV no puede contener hojas repeat separadas. Se mantiene compatibilidad.
+    if lower_url.endswith(".csv") or "data.csv" in lower_url or "text/csv" in content_type:
         df = pd.read_csv(io.BytesIO(content), dtype=str)
-    else:
-        df = pd.read_excel(io.BytesIO(content), dtype=str)
+        df.columns = [clean_col(c) for c in df.columns]
+        df = df.dropna(how="all")
+        return df, {}
 
-    df.columns = [clean_col(c) for c in df.columns]
-    df = df.dropna(how="all")
-    return df
+    # En XLSX se leen TODAS las hojas. La primera continúa siendo la tabla principal.
+    try:
+        workbook = pd.read_excel(io.BytesIO(content), sheet_name=None, dtype=str)
+    except Exception:
+        # Respaldo: algunas URLs de exportación no exponen claramente el formato.
+        try:
+            df = pd.read_csv(io.BytesIO(content), dtype=str)
+            df.columns = [clean_col(c) for c in df.columns]
+            df = df.dropna(how="all")
+            return df, {}
+        except Exception as exc:
+            raise RuntimeError("No se pudo interpretar la exportación de KOBO como XLSX ni CSV.") from exc
+
+    cleaned_sheets: dict[str, pd.DataFrame] = {}
+    for sheet_name, sheet_df in workbook.items():
+        cleaned = sheet_df.copy()
+        cleaned.columns = [clean_col(c) for c in cleaned.columns]
+        cleaned = cleaned.dropna(how="all")
+        cleaned_sheets[str(sheet_name)] = cleaned
+
+    if not cleaned_sheets:
+        return pd.DataFrame(), {}
+
+    main_sheet_name = next(iter(cleaned_sheets))
+    main_df = cleaned_sheets[main_sheet_name]
+    repeat_sheets = {
+        name: sheet
+        for name, sheet in cleaned_sheets.items()
+        if name != main_sheet_name
+    }
+
+    return main_df, repeat_sheets
 
 
 def find_column(df: pd.DataFrame, preferred: str, candidates: Iterable[str]) -> str | None:
@@ -1398,6 +1442,8 @@ def normalize_province_name(value: Any) -> str:
         return ""
 
     text = norm_text(value)
+    if not text:
+        return ""
 
     aliases = {
         "santo domingo": "santo domingo de los tsachilas",
@@ -1407,7 +1453,8 @@ def normalize_province_name(value: Any) -> str:
         "morona": "morona santiago",
     }
 
-    # Se revisan primero los nombres oficiales completos.
+    # Primero se buscan nombres oficiales dentro de valores como
+    # "17 - Pichincha", "ec_17_pichincha" o etiquetas completas.
     for province in ECUADOR_PROVINCES:
         if province in text:
             return province
@@ -1416,27 +1463,217 @@ def normalize_province_name(value: Any) -> str:
         if alias in text:
             return province
 
+    # Respaldo para formularios que exporten únicamente código INEC 01-24.
+    code_map = {
+        1: "azuay",
+        2: "bolivar",
+        3: "canar",
+        4: "carchi",
+        5: "cotopaxi",
+        6: "chimborazo",
+        7: "el oro",
+        8: "esmeraldas",
+        9: "guayas",
+        10: "imbabura",
+        11: "loja",
+        12: "los rios",
+        13: "manabi",
+        14: "morona santiago",
+        15: "napo",
+        16: "pastaza",
+        17: "pichincha",
+        18: "tungurahua",
+        19: "zamora chinchipe",
+        20: "galapagos",
+        21: "sucumbios",
+        22: "orellana",
+        23: "santo domingo de los tsachilas",
+        24: "santa elena",
+    }
+    code_match = re.fullmatch(r"(?:0?)([1-9]|1[0-9]|2[0-4])", text)
+    if code_match:
+        return code_map.get(int(code_match.group(1)), "")
+
     return ""
 
 
 def detect_province_column(df: pd.DataFrame) -> str | None:
+    """Detecta provincia en una tabla normal o en un repeat ya aplanado."""
     if df.empty:
         return None
 
     preferred = get_secret("PROVINCE_COLUMN", "")
-    return find_column(
-        df,
-        preferred,
-        [
-            "provincia donde",
-            "provincia de ubicación",
-            "provincia de ubicacion",
-            "provincia",
-        ],
+    if preferred:
+        found = find_column(df, preferred, [])
+        if found:
+            return found
+
+    # Nombres técnicos del XLSForm primero.
+    for field_name in ["provincia_operacion", "provincia_operación", "provincia"]:
+        found = find_field_column(df, field_name)
+        if found:
+            return found
+
+    candidates = []
+    for col in df.columns:
+        col_norm = norm_text(col)
+        if "provincia" not in col_norm:
+            continue
+        sample = df[col].dropna().head(80)
+        valid = sum(bool(normalize_province_name(v)) for v in sample)
+        candidates.append((valid, col))
+
+    if candidates:
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        if candidates[0][0] > 0:
+            return candidates[0][1]
+
+    return None
+
+
+def detect_repeat_province_column(df: pd.DataFrame) -> str | None:
+    """Prioriza específicamente ``provincia_operacion`` dentro de hojas repeat."""
+    if df.empty:
+        return None
+
+    for field_name in ["provincia_operacion", "provincia_operación"]:
+        found = find_field_column(df, field_name)
+        if found:
+            return found
+
+    return detect_province_column(df)
+
+
+def _find_id_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    if df.empty:
+        return None
+    wanted = {norm_id(c) for c in candidates}
+    for col in df.columns:
+        if norm_id(col) in wanted:
+            return col
+    return None
+
+
+def filter_repeat_to_public_records(repeat_df: pd.DataFrame, public_df: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
+    """Filtra un repeat a las observaciones públicas más recientes cuando KOBO exporta llaves padre.
+
+    Si no se encuentra una relación inequívoca se conserva el repeat completo; esto
+    permite seguir mostrando cobertura sin perder datos en variantes de exportación.
+    Devuelve además la columna que identifica al padre, útil para no contar dos
+    localidades de la misma empresa en una misma provincia.
+    """
+    if repeat_df.empty or public_df.empty:
+        return repeat_df.copy(), None
+
+    key_pairs = [
+        (["_parent_index", "parent_index"], ["_index", "index"]),
+        (["parent_key", "_parent_key", "PARENT_KEY"], ["key", "KEY"]),
+        (["_parent_uuid", "parent_uuid"], ["_uuid", "uuid"]),
+        (["_parent_id", "parent_id"], ["_id", "id"]),
+    ]
+
+    for repeat_candidates, main_candidates in key_pairs:
+        repeat_key = _find_id_column(repeat_df, repeat_candidates)
+        main_key = _find_id_column(public_df, main_candidates)
+        if not repeat_key or not main_key:
+            continue
+
+        allowed = {
+            str(v).strip()
+            for v in public_df[main_key].dropna()
+            if str(v).strip()
+        }
+        if not allowed:
+            continue
+
+        filtered = repeat_df[
+            repeat_df[repeat_key].astype(str).str.strip().isin(allowed)
+        ].copy()
+
+        # Si la relación existe pero no devuelve filas, no se fuerza un repeat vacío:
+        # otra variante de exportación puede usar índices de distinto tipo.
+        if not filtered.empty:
+            return filtered, repeat_key
+
+    # Intento adicional para _parent_index numérico vs _index exportado como "1.0".
+    repeat_key = _find_id_column(repeat_df, ["_parent_index", "parent_index"])
+    main_key = _find_id_column(public_df, ["_index", "index"])
+    if repeat_key and main_key:
+        main_numeric = pd.to_numeric(public_df[main_key], errors="coerce").dropna()
+        repeat_numeric = pd.to_numeric(repeat_df[repeat_key], errors="coerce")
+        if not main_numeric.empty:
+            filtered = repeat_df[repeat_numeric.isin(set(main_numeric.tolist()))].copy()
+            if not filtered.empty:
+                return filtered, repeat_key
+
+    return repeat_df.copy(), None
+
+
+def province_counts_from_repeat_sheets(
+    repeat_sheets: dict[str, pd.DataFrame],
+    public_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Construye cobertura provincial a partir de todos los repeats de KOBO.
+
+    Busca hojas que contengan ``provincia_operacion``. Cuando existe una llave de
+    relación padre, cuenta una sola vez cada provincia por encuesta/empresa aun si
+    se registraron varias localidades dentro de la misma provincia.
+    """
+    empty = pd.DataFrame(columns=["province_key", "Provincia", "Registros", "lat", "lon"])
+    if not repeat_sheets:
+        return empty, []
+
+    rows: list[pd.DataFrame] = []
+    used_sheets: list[str] = []
+
+    for sheet_name, sheet_df in repeat_sheets.items():
+        if sheet_df.empty:
+            continue
+
+        province_col = detect_repeat_province_column(sheet_df)
+        if not province_col:
+            continue
+
+        normalized = sheet_df[province_col].apply(normalize_province_name)
+        if not (normalized != "").any():
+            continue
+
+        filtered, parent_col = filter_repeat_to_public_records(sheet_df, public_df)
+        normalized = filtered[province_col].apply(normalize_province_name)
+        tmp = pd.DataFrame({"province_key": normalized})
+        tmp = tmp[tmp["province_key"] != ""].copy()
+        if tmp.empty:
+            continue
+
+        if parent_col and parent_col in filtered.columns:
+            tmp["__parent"] = filtered.loc[tmp.index, parent_col].astype(str).str.strip()
+            tmp = tmp.drop_duplicates(subset=["__parent", "province_key"])
+        else:
+            # Sin llave padre, se conserva cada localidad válida como registro territorial.
+            tmp["__parent"] = ""
+
+        tmp["__sheet"] = str(sheet_name)
+        rows.append(tmp)
+        used_sheets.append(str(sheet_name))
+
+    if not rows:
+        return empty, []
+
+    combined = pd.concat(rows, ignore_index=True)
+    counts = (
+        combined["province_key"]
+        .value_counts()
+        .rename_axis("province_key")
+        .reset_index(name="Registros")
     )
+    counts["Provincia"] = counts["province_key"].map(PROVINCE_DISPLAY)
+    counts["lat"] = counts["province_key"].apply(lambda x: ECUADOR_PROVINCES[x][0])
+    counts["lon"] = counts["province_key"].apply(lambda x: ECUADOR_PROVINCES[x][1])
+    return counts, used_sheets
 
 
 def detect_geopoint_column(df: pd.DataFrame) -> str | None:
+    """Selecciona la columna que realmente contiene coordenadas, no solo una etiqueta con 'GPS'."""
     if df.empty:
         return None
 
@@ -1461,12 +1698,33 @@ def detect_geopoint_column(df: pd.DataFrame) -> str | None:
     ]
     terms_norm = [norm_text(term) for term in terms]
 
+    candidates: list[tuple[int, int, str]] = []
     for col in df.columns:
         col_norm = norm_text(col)
-        if any(term in col_norm for term in terms_norm):
-            return col
+        col_id = norm_id(col)
+        if not any(term in col_norm for term in terms_norm) and "geopoint" not in col_id:
+            continue
 
-    return None
+        sample = df[col].dropna().head(100)
+        valid_coords = 0
+        for value in sample:
+            lat, lon = parse_ecuador_coordinates(value)
+            if lat is not None and lon is not None:
+                valid_coords += 1
+
+        name_bonus = 0
+        if col_id == "geopoint" or col_id.endswith("geopoint"):
+            name_bonus += 3
+        if "georeferenciaciondeladireccion" in col_id or "georreferenciaciondeladireccion" in col_id:
+            name_bonus += 2
+
+        candidates.append((valid_coords, name_bonus, col))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return candidates[0][2]
 
 
 def detect_lat_lon_columns(df: pd.DataFrame) -> tuple[str | None, str | None]:
@@ -1713,68 +1971,498 @@ def public_georeferenced_points(public_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(points)
 
 
-def public_map_figure(province_df: pd.DataFrame, geo_df: pd.DataFrame) -> go.Figure:
-    fig = go.Figure()
+def render_professional_ecuador_map(
+    province_df: pd.DataFrame,
+    geo_df: pd.DataFrame,
+    height: int = 540,
+) -> None:
+    """Renderiza un mapa Leaflet profesional centrado en Ecuador.
 
+    El mapa se ejecuta dentro de un componente HTML aislado y no depende de
+    ``Scattermapbox``/``Scattermap`` de Plotly. Usa CartoDB Positron como mapa
+    base, OpenStreetMap como alternativa, marcadores agregados por provincia
+    y clustering de los puntos GPS exactos. No requiere token de Mapbox.
+    """
+
+    province_points: list[dict[str, Any]] = []
     if not province_df.empty:
         max_count = max(float(province_df["Registros"].max()), 1.0)
-        province_sizes = 18 + (province_df["Registros"].astype(float) / max_count) * 28
+        for _, item in province_df.iterrows():
+            try:
+                count = int(float(item.get("Registros", 0)))
+                lat = float(item.get("lat"))
+                lon = float(item.get("lon"))
+            except Exception:
+                continue
 
-        fig.add_trace(
-            go.Scattermapbox(
-                lat=province_df["lat"],
-                lon=province_df["lon"],
-                mode="markers",
-                name="Empresas por provincia",
-                marker=dict(size=province_sizes, color="#7144C6", opacity=0.82),
-                text=[
-                    f"<b>{prov}</b><br>{int(count)} empresa{'s' if int(count) != 1 else ''}"
-                    for prov, count in zip(province_df["Provincia"], province_df["Registros"])
-                ],
-                hovertemplate="%{text}<extra></extra>",
+            # Escala visual compacta: 38–62 px según presencia relativa.
+            size = 38 + int((count / max_count) * 24)
+            province_points.append(
+                {
+                    "name": str(item.get("Provincia", "Provincia")),
+                    "count": count,
+                    "lat": lat,
+                    "lon": lon,
+                    "size": size,
+                }
             )
-        )
 
+    gps_points: list[dict[str, Any]] = []
     if not geo_df.empty:
-        hover_text = []
         for _, item in geo_df.iterrows():
-            province = str(item.get("Provincia", "")).strip()
-            hover_text.append(
-                f"Registro georreferenciado<br>{province}"
-                if province
-                else "Registro georreferenciado"
+            try:
+                lat = float(item.get("lat"))
+                lon = float(item.get("lon"))
+            except Exception:
+                continue
+
+            province = str(item.get("Provincia", "") or "").strip()
+            gps_points.append(
+                {
+                    "lat": lat,
+                    "lon": lon,
+                    "province": province,
+                }
             )
 
-        fig.add_trace(
-            go.Scattermapbox(
-                lat=geo_df["lat"],
-                lon=geo_df["lon"],
-                mode="markers",
-                name="Georreferencias",
-                marker=dict(size=10, color="#F47948", opacity=0.92),
-                text=hover_text,
-                hovertemplate="%{text}<extra></extra>",
-            )
-        )
+    province_json = json.dumps(province_points, ensure_ascii=False)
+    gps_json = json.dumps(gps_points, ensure_ascii=False)
 
-    fig.update_layout(
-        height=470,
-        margin=dict(l=0, r=0, t=0, b=0),
-        mapbox=dict(
-            style="open-street-map",
-            center=dict(lat=-1.45, lon=-78.25),
-            zoom=5.25,
-        ),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=0.01,
-            xanchor="left",
-            x=0.01,
-            bgcolor="rgba(255,255,255,0.85)",
-        ),
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+        <link
+            rel="stylesheet"
+            href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+            integrity="sha256-p4NxAoJBhIINfQ3ynhHdMcVS5tKXYxFt2Z6V8K2Cw7Y="
+            crossorigin=""
+        />
+        <link
+            rel="stylesheet"
+            href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"
+        />
+        <link
+            rel="stylesheet"
+            href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"
+        />
+
+        <style>
+            html, body {{
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+                background: transparent;
+                font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            }}
+
+            #map-wrap {{
+                position: relative;
+                width: 100%;
+                height: {height - 4}px;
+                border: 1px solid #e7e4f0;
+                border-radius: 18px;
+                overflow: hidden;
+                box-shadow: 0 4px 18px rgba(31, 24, 67, 0.07);
+                background: #eef5f8;
+            }}
+
+            #ecuador-map {{
+                width: 100%;
+                height: 100%;
+            }}
+
+            .leaflet-control-zoom a {{
+                color: #2c2454 !important;
+                border: none !important;
+            }}
+
+            .leaflet-control-zoom {{
+                border: none !important;
+                box-shadow: 0 3px 14px rgba(20, 20, 40, 0.16) !important;
+                border-radius: 10px !important;
+                overflow: hidden;
+            }}
+
+            .leaflet-control-attribution {{
+                font-size: 9px !important;
+                background: rgba(255,255,255,0.86) !important;
+            }}
+
+            .province-div-icon,
+            .gps-div-icon {{
+                background: transparent;
+                border: none;
+            }}
+
+            .province-bubble {{
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 999px;
+                background: linear-gradient(145deg, #7c4dce, #5d35b2);
+                border: 3px solid rgba(255,255,255,0.96);
+                box-shadow: 0 5px 18px rgba(80, 43, 157, 0.34);
+                color: #ffffff;
+                font-weight: 800;
+                font-size: 14px;
+                line-height: 1;
+                user-select: none;
+            }}
+
+            .gps-pin {{
+                position: relative;
+                width: 30px;
+                height: 38px;
+                transform: translate(-1px, -2px);
+                filter: drop-shadow(0 4px 5px rgba(0,0,0,0.22));
+            }}
+
+            .gps-pin svg {{
+                width: 30px;
+                height: 38px;
+                display: block;
+            }}
+
+            .leaflet-tooltip.tv-tooltip {{
+                border: 0;
+                border-radius: 9px;
+                box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+                padding: 8px 10px;
+                color: #29233f;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+
+            .map-legend {{
+                background: rgba(255,255,255,0.94);
+                border: 1px solid rgba(227,223,239,0.95);
+                border-radius: 12px;
+                padding: 9px 12px;
+                box-shadow: 0 3px 14px rgba(20, 20, 40, 0.12);
+                color: #4e4a61;
+                font-size: 11px;
+                line-height: 1.35;
+            }}
+
+            .map-legend-row {{
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                margin: 3px 0;
+                white-space: nowrap;
+            }}
+
+            .legend-province {{
+                width: 13px;
+                height: 13px;
+                border-radius: 50%;
+                background: #6d43c0;
+                border: 2px solid white;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+            }}
+
+            .legend-gps {{
+                width: 10px;
+                height: 10px;
+                border-radius: 50% 50% 50% 0;
+                background: #f47a48;
+                transform: rotate(-45deg);
+                margin-left: 2px;
+            }}
+
+            .map-title-chip {{
+                background: rgba(255,255,255,0.95);
+                border: 1px solid rgba(227,223,239,0.95);
+                border-radius: 12px;
+                padding: 9px 12px;
+                box-shadow: 0 3px 14px rgba(20, 20, 40, 0.12);
+                color: #252047;
+            }}
+
+            .map-title-chip strong {{
+                display: block;
+                font-size: 12px;
+                margin-bottom: 2px;
+            }}
+
+            .map-title-chip span {{
+                font-size: 10px;
+                color: #777185;
+            }}
+
+            .marker-cluster-small,
+            .marker-cluster-medium,
+            .marker-cluster-large {{
+                background-color: rgba(111, 68, 194, 0.22) !important;
+            }}
+
+            .marker-cluster-small div,
+            .marker-cluster-medium div,
+            .marker-cluster-large div {{
+                background-color: #6f44c2 !important;
+                color: white !important;
+                font-weight: 800 !important;
+            }}
+
+            #galapagos-inset {{
+                display: none;
+                position: absolute;
+                left: 14px;
+                bottom: 62px;
+                width: 205px;
+                height: 138px;
+                z-index: 800;
+                border: 3px solid white;
+                border-radius: 12px;
+                box-shadow: 0 5px 18px rgba(0,0,0,0.23);
+                overflow: hidden;
+                background: #eef5f8;
+            }}
+
+            #galapagos-label {{
+                display: none;
+                position: absolute;
+                left: 22px;
+                bottom: 174px;
+                z-index: 900;
+                background: rgba(255,255,255,0.93);
+                color: #312858;
+                border-radius: 7px;
+                padding: 3px 7px;
+                font-size: 10px;
+                font-weight: 700;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+            }}
+        </style>
+    </head>
+
+    <body>
+        <div id="map-wrap">
+            <div id="ecuador-map"></div>
+            <div id="galapagos-label">Galápagos</div>
+            <div id="galapagos-inset"></div>
+        </div>
+
+        <script
+            src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""
+        ></script>
+        <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+        <script>
+            const provincePoints = {province_json};
+            const gpsPoints = {gps_json};
+
+            const mainlandBounds = L.latLngBounds(
+                [-5.45, -81.35],
+                [1.65, -74.95]
+            );
+
+            const maxBounds = L.latLngBounds(
+                [-7.0, -83.0],
+                [3.0, -73.5]
+            );
+
+            const map = L.map('ecuador-map', {{
+                zoomControl: false,
+                attributionControl: true,
+                preferCanvas: true,
+                maxBounds: maxBounds,
+                maxBoundsViscosity: 0.72,
+                minZoom: 5,
+                maxZoom: 13
+            }});
+
+            const cartoLight = L.tileLayer(
+                'https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png',
+                {{
+                    maxZoom: 20,
+                    attribution: '&copy; OpenStreetMap &copy; CARTO'
+                }}
+            );
+
+            const osm = L.tileLayer(
+                'https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',
+                {{
+                    maxZoom: 19,
+                    attribution: '&copy; OpenStreetMap contributors'
+                }}
+            );
+
+            cartoLight.addTo(map);
+            map.fitBounds(mainlandBounds, {{padding: [8, 8]}});
+
+            L.control.zoom({{position: 'topright'}}).addTo(map);
+            L.control.scale({{position: 'bottomright', imperial: false}}).addTo(map);
+            L.control.layers(
+                {{'Mapa claro': cartoLight, 'OpenStreetMap': osm}},
+                null,
+                {{position: 'topright', collapsed: true}}
+            ).addTo(map);
+
+            const titleControl = L.control({{position: 'topleft'}});
+            titleControl.onAdd = function() {{
+                const div = L.DomUtil.create('div', 'map-title-chip');
+                div.innerHTML = '<strong>Ecuador</strong><span>Cobertura territorial y puntos GPS</span>';
+                L.DomEvent.disableClickPropagation(div);
+                return div;
+            }};
+            titleControl.addTo(map);
+
+            const legend = L.control({{position: 'bottomleft'}});
+            legend.onAdd = function() {{
+                const div = L.DomUtil.create('div', 'map-legend');
+                div.innerHTML = `
+                    <div class="map-legend-row">
+                        <span class="legend-province"></span>
+                        <span>Cobertura por provincia</span>
+                    </div>
+                    <div class="map-legend-row">
+                        <span class="legend-gps"></span>
+                        <span>Georreferencia exacta</span>
+                    </div>
+                `;
+                L.DomEvent.disableClickPropagation(div);
+                return div;
+            }};
+            legend.addTo(map);
+
+            // Marcadores agregados de provincia.
+            provincePoints
+                .filter(p => p.lon > -85)
+                .forEach(p => {{
+                    const icon = L.divIcon({{
+                        className: 'province-div-icon',
+                        html: `<div class="province-bubble" style="width:${{p.size}}px;height:${{p.size}}px;">${{p.count}}</div>`,
+                        iconSize: [p.size, p.size],
+                        iconAnchor: [p.size / 2, p.size / 2]
+                    }});
+
+                    L.marker([p.lat, p.lon], {{icon, zIndexOffset: 250}})
+                        .bindTooltip(
+                            `<b>${{p.name}}</b><br>${{p.count}} registro${{p.count === 1 ? '' : 's'}} territorial${{p.count === 1 ? '' : 'es'}}`,
+                            {{className: 'tv-tooltip', direction: 'top', offset: [0, -8]}}
+                        )
+                        .addTo(map);
+                }});
+
+            // Puntos GPS con clustering.
+            const cluster = L.markerClusterGroup({{
+                showCoverageOnHover: false,
+                spiderfyOnMaxZoom: true,
+                removeOutsideVisibleBounds: true,
+                maxClusterRadius: 48,
+                disableClusteringAtZoom: 10
+            }});
+
+            const pinSvg = `
+                <div class="gps-pin">
+                    <svg viewBox="0 0 30 38" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M15 1C7.8 1 2 6.8 2 14c0 9.4 13 23 13 23s13-13.6 13-23C28 6.8 22.2 1 15 1z"
+                              fill="#f47a48" stroke="#ffffff" stroke-width="2"/>
+                        <circle cx="15" cy="14" r="5" fill="#ffffff"/>
+                    </svg>
+                </div>`;
+
+            gpsPoints
+                .filter(p => p.lon > -85)
+                .forEach(p => {{
+                    const icon = L.divIcon({{
+                        className: 'gps-div-icon',
+                        html: pinSvg,
+                        iconSize: [30, 38],
+                        iconAnchor: [15, 36],
+                        popupAnchor: [0, -32]
+                    }});
+
+                    const marker = L.marker([p.lat, p.lon], {{icon}});
+                    marker.bindTooltip(
+                        p.province
+                            ? `<b>Registro georreferenciado</b><br>${{p.province}}`
+                            : '<b>Registro georreferenciado</b>',
+                        {{className: 'tv-tooltip', direction: 'top', offset: [0, -20]}}
+                    );
+                    cluster.addLayer(marker);
+                }});
+
+            map.addLayer(cluster);
+
+            // Inset automático para Galápagos cuando existan registros allí.
+            const galProvincePoints = provincePoints.filter(p => p.lon <= -85);
+            const galGpsPoints = gpsPoints.filter(p => p.lon <= -85);
+
+            if (galProvincePoints.length > 0 || galGpsPoints.length > 0) {{
+                document.getElementById('galapagos-inset').style.display = 'block';
+                document.getElementById('galapagos-label').style.display = 'block';
+
+                const galMap = L.map('galapagos-inset', {{
+                    zoomControl: false,
+                    attributionControl: false,
+                    dragging: true,
+                    scrollWheelZoom: false,
+                    doubleClickZoom: true,
+                    minZoom: 5,
+                    maxZoom: 12
+                }});
+                cartoLight.clone = undefined;
+                L.tileLayer(
+                    'https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png',
+                    {{maxZoom: 20}}
+                ).addTo(galMap);
+                galMap.setView([-0.75, -90.55], 7);
+
+                galProvincePoints.forEach(p => {{
+                    const insetSize = Math.max(30, Math.min(44, p.size - 8));
+                    const icon = L.divIcon({{
+                        className: 'province-div-icon',
+                        html: `<div class="province-bubble" style="width:${{insetSize}}px;height:${{insetSize}}px;font-size:12px;">${{p.count}}</div>`,
+                        iconSize: [insetSize, insetSize],
+                        iconAnchor: [insetSize / 2, insetSize / 2]
+                    }});
+                    L.marker([p.lat, p.lon], {{icon}})
+                        .bindTooltip(`<b>${{p.name}}</b><br>${{p.count}} registro(s)`, {{className: 'tv-tooltip'}})
+                        .addTo(galMap);
+                }});
+
+                galGpsPoints.forEach(p => {{
+                    const icon = L.divIcon({{
+                        className: 'gps-div-icon',
+                        html: pinSvg,
+                        iconSize: [27, 34],
+                        iconAnchor: [13, 32]
+                    }});
+                    L.marker([p.lat, p.lon], {{icon}}).addTo(galMap);
+                }});
+            }}
+
+            // Evita que el scroll de la página haga zoom accidental en el mapa.
+            map.scrollWheelZoom.disable();
+            map.on('click', function() {{
+                map.scrollWheelZoom.enable();
+            }});
+            map.on('mouseout', function() {{
+                map.scrollWheelZoom.disable();
+            }});
+
+            // Corrige tamaño tras cargar el iframe de Streamlit.
+            setTimeout(() => map.invalidateSize(), 250);
+            setTimeout(() => map.invalidateSize(), 800);
+        </script>
+    </body>
+    </html>
+    """
+
+    st.components.v1.html(
+        html,
+        height=height,
+        scrolling=False,
     )
-    return fig
 
 
 def public_weps_figure(principle_scores: dict[int, float | None]) -> go.Figure:
@@ -1845,7 +2533,11 @@ def public_levels_figure(level_counts: dict[str, int]) -> go.Figure:
     return fig
 
 
-def render_public_summary(df: pd.DataFrame, company_col: str | None) -> None:
+def render_public_summary(
+    df: pd.DataFrame,
+    company_col: str | None,
+    repeat_sheets: dict[str, pd.DataFrame] | None = None,
+) -> None:
     public_css()
 
     # Para resultados institucionales se conserva la observación más reciente
@@ -1855,8 +2547,17 @@ def render_public_summary(df: pd.DataFrame, company_col: str | None) -> None:
     total_score, principle_scores, company_scores = calculate_public_scores(public_df)
     general_level = level_from_score(total_score)
 
-    province_col = detect_province_column(public_df)
-    province_df = public_province_counts(public_df, province_col)
+    # La cobertura territorial se toma primero del repeat ``localidades_operacion``.
+    # Si el export no incluye hojas repeat, se usa la provincia disponible en la tabla principal.
+    repeat_sheets = repeat_sheets or {}
+    province_df, province_repeat_sheets = province_counts_from_repeat_sheets(repeat_sheets, public_df)
+    province_source = "repeat" if not province_df.empty else "main"
+
+    if province_df.empty:
+        province_col = detect_province_column(public_df)
+        province_df = public_province_counts(public_df, province_col)
+
+    # Los puntos exactos se toman de la georreferenciación 5.1 de la tabla principal.
     geo_df = public_georeferenced_points(public_df)
 
     companies = (
@@ -1990,7 +2691,7 @@ def render_public_summary(df: pd.DataFrame, company_col: str | None) -> None:
         """
         <div class="tv-card-title">Cobertura territorial y georreferenciación</div>
         <div class="tv-section-caption">
-            Distribución territorial de las empresas y registros disponibles en KOBO.
+            Provincias declaradas en las localidades de operación y puntos GPS registrados en KOBO.
         </div>
         """,
         unsafe_allow_html=True,
@@ -2000,11 +2701,10 @@ def render_public_summary(df: pd.DataFrame, company_col: str | None) -> None:
 
     with map_col:
         if not province_df.empty or not geo_df.empty:
-            st.plotly_chart(
-                public_map_figure(province_df, geo_df),
-                use_container_width=True,
-                config=PUBLIC_MAP_CONFIG,
-                key="public_ecuador_map",
+            render_professional_ecuador_map(
+                province_df,
+                geo_df,
+                height=540,
             )
         else:
             st.info(
@@ -2015,7 +2715,7 @@ def render_public_summary(df: pd.DataFrame, company_col: str | None) -> None:
         st.markdown(
             """
             <div class="tv-card">
-                <div class="tv-card-title">Provincias con más empresas</div>
+                <div class="tv-card-title">Provincias con mayor presencia registrada</div>
             """,
             unsafe_allow_html=True,
         )
@@ -2038,11 +2738,21 @@ def render_public_summary(df: pd.DataFrame, company_col: str | None) -> None:
         else:
             st.caption("Sin información provincial disponible.")
 
-        if not geo_df.empty:
+        if province_source == "repeat" and province_repeat_sheets:
             st.markdown(
                 f"""
                 <div style="margin-top:15px; color:#767b8c; font-size:0.82rem;">
-                    📍 {len(geo_df)} registros cuentan con coordenadas geográficas.
+                    Cobertura obtenida de localidades de operación registradas en KOBO.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        if not geo_df.empty:
+            st.markdown(
+                f"""
+                <div style="margin-top:10px; color:#767b8c; font-size:0.82rem;">
+                    📍 {len(geo_df)} empresas cuentan con coordenadas geográficas válidas.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -2095,7 +2805,12 @@ def render_public_summary(df: pd.DataFrame, company_col: str | None) -> None:
     )
 
 
-def render_diagnostics(df: pd.DataFrame, company_col: str | None, code_col: str | None) -> None:
+def render_diagnostics(
+    df: pd.DataFrame,
+    company_col: str | None,
+    code_col: str | None,
+    repeat_sheets: dict[str, pd.DataFrame] | None = None,
+) -> None:
     st.subheader("Diagnóstico técnico")
     password = st.text_input("Clave de administrador", type="password")
     if password != get_secret("ADMIN_PASSWORD", "TurismoVioleta2026"):
@@ -2108,6 +2823,22 @@ def render_diagnostics(df: pd.DataFrame, company_col: str | None, code_col: str 
     st.write(f"Columna empresa detectada: {company_col}")
     st.write(f"Columna código principal detectada: {code_col}")
     st.write(f"Todas las columnas posibles de código: {detect_access_code_columns(df)}")
+
+    repeat_sheets = repeat_sheets or {}
+    st.write(f"Hojas repeat detectadas: {list(repeat_sheets.keys()) if repeat_sheets else 'Ninguna'}")
+    if repeat_sheets:
+        repeat_debug = []
+        for sheet_name, sheet_df in repeat_sheets.items():
+            repeat_debug.append(
+                {
+                    "hoja": sheet_name,
+                    "filas": len(sheet_df),
+                    "columnas": len(sheet_df.columns),
+                    "provincia detectada": detect_repeat_province_column(sheet_df),
+                }
+            )
+        st.write("Diagnóstico de hojas repeat:")
+        st.dataframe(pd.DataFrame(repeat_debug), use_container_width=True, hide_index=True)
 
     score_fields = [p["score_field"] for p in PRINCIPLES] + [o["score_field"] for o in OBJECTIVES.values()] + [i["score_field"] for i in INDICATORS.values()]
     found = []
@@ -2139,7 +2870,7 @@ def main() -> None:
 
     try:
         with st.spinner("Cargando datos desde KOBO..."):
-            df = load_data_from_source(url, token)
+            df, repeat_sheets = load_data_from_source(url, token)
     except Exception as exc:
         st.error("No se pudo cargar la fuente de datos de KOBO.")
         st.exception(exc)
@@ -2156,9 +2887,9 @@ def main() -> None:
     with tab1:
         render_company_view(df, company_col, code_col)
     with tab2:
-        render_public_summary(df, company_col)
+        render_public_summary(df, company_col, repeat_sheets)
     with tab3:
-        render_diagnostics(df, company_col, code_col)
+        render_diagnostics(df, company_col, code_col, repeat_sheets)
 
 
 if __name__ == "__main__":
