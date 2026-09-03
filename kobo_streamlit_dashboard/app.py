@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v17 indicadores expandidos sin barra horizontal"
+APP_VERSION = "v18 resumen publico y mapa Ecuador"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -1200,18 +1200,899 @@ def render_result(row: pd.Series, df: pd.DataFrame, company_name: str) -> None:
                         render_indicator_table(row, df, meta["indicators"])
 
 
-def render_public_summary(df: pd.DataFrame, company_col: str | None) -> None:
-    st.subheader("Resumen público agregado")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Encuestas", len(df))
-    col2.metric("Empresas", df[company_col].nunique() if company_col else "Sin columna")
-    date_col = find_column(df, "", ["fecha de envio", "fecha de envío", "submission", "end", "fin"])
-    if date_col and len(df):
-        col3.metric("Última actualización", parse_date(df.iloc[-1].get(date_col)))
-    else:
-        col3.metric("Última actualización", "Sin fecha")
+# ============================================================
+# RESUMEN PÚBLICO | TURISMO VIOLETA
+# Dashboard agregado con cobertura territorial, resultados WEPs
+# y distribución de empresas por nivel.
+# ============================================================
 
-    st.info("Los resultados agregados se actualizan desde KOBO según el tiempo de caché configurado en la app. La vista individual requiere nombre de empresa y código de acceso.")
+PUBLIC_MAP_CONFIG = {
+    "displayModeBar": False,
+    "scrollZoom": False,
+    "responsive": True,
+}
+
+# Coordenadas aproximadas de referencia provincial para el mapa agregado.
+# Se utilizan únicamente cuando la fuente KOBO dispone de provincia pero no
+# de coordenadas individuales válidas.
+ECUADOR_PROVINCES = {
+    "azuay": (-2.9001, -79.0059),
+    "bolivar": (-1.5926, -79.0009),
+    "canar": (-2.5589, -78.9388),
+    "carchi": (0.8119, -77.7173),
+    "chimborazo": (-1.6731, -78.6483),
+    "cotopaxi": (-0.9333, -78.6167),
+    "el oro": (-3.2581, -79.9554),
+    "esmeraldas": (0.9682, -79.6517),
+    "galapagos": (-0.9538, -90.9656),
+    "guayas": (-2.1709, -79.9224),
+    "imbabura": (0.3517, -78.1223),
+    "loja": (-3.9931, -79.2042),
+    "los rios": (-1.8022, -79.5344),
+    "manabi": (-1.0546, -80.4545),
+    "morona santiago": (-2.3087, -78.1114),
+    "napo": (-0.9938, -77.8129),
+    "orellana": (-0.4664, -76.9868),
+    "pastaza": (-1.4924, -78.0026),
+    "pichincha": (-0.1807, -78.4678),
+    "santa elena": (-2.2267, -80.8587),
+    "santo domingo de los tsachilas": (-0.2531, -79.1754),
+    "sucumbios": (0.0860, -76.8890),
+    "tungurahua": (-1.2491, -78.6168),
+    "zamora chinchipe": (-4.0692, -78.9567),
+}
+
+PROVINCE_DISPLAY = {
+    "azuay": "Azuay",
+    "bolivar": "Bolívar",
+    "canar": "Cañar",
+    "carchi": "Carchi",
+    "chimborazo": "Chimborazo",
+    "cotopaxi": "Cotopaxi",
+    "el oro": "El Oro",
+    "esmeraldas": "Esmeraldas",
+    "galapagos": "Galápagos",
+    "guayas": "Guayas",
+    "imbabura": "Imbabura",
+    "loja": "Loja",
+    "los rios": "Los Ríos",
+    "manabi": "Manabí",
+    "morona santiago": "Morona Santiago",
+    "napo": "Napo",
+    "orellana": "Orellana",
+    "pastaza": "Pastaza",
+    "pichincha": "Pichincha",
+    "santa elena": "Santa Elena",
+    "santo domingo de los tsachilas": "Santo Domingo de los Tsáchilas",
+    "sucumbios": "Sucumbíos",
+    "tungurahua": "Tungurahua",
+    "zamora chinchipe": "Zamora Chinchipe",
+}
+
+
+def public_css() -> None:
+    st.markdown(
+        """
+        <style>
+        .tv-public-intro {
+            margin-bottom: 0.7rem;
+        }
+        .tv-public-intro h2 {
+            margin-bottom: 0.15rem;
+            color: #221a4f;
+            font-size: 2rem;
+            font-weight: 750;
+        }
+        .tv-public-intro p {
+            color: #667085;
+            font-size: 1rem;
+            margin-top: 0;
+        }
+        .tv-kpi {
+            background: #ffffff;
+            border: 1px solid #eceaf5;
+            border-radius: 16px;
+            padding: 16px 18px;
+            min-height: 128px;
+            box-shadow: 0 3px 12px rgba(25, 18, 60, 0.05);
+        }
+        .tv-kpi-label {
+            font-size: 0.86rem;
+            color: #62677a;
+            font-weight: 600;
+            min-height: 40px;
+        }
+        .tv-kpi-value {
+            font-size: 2rem;
+            line-height: 1.05;
+            font-weight: 800;
+            color: #6639b7;
+            margin-top: 6px;
+        }
+        .tv-kpi-detail {
+            font-size: 0.78rem;
+            color: #8b8fa0;
+            margin-top: 6px;
+        }
+        .tv-card {
+            background: #ffffff;
+            border: 1px solid #eceaf5;
+            border-radius: 16px;
+            padding: 18px 20px;
+            box-shadow: 0 3px 12px rgba(25, 18, 60, 0.045);
+            height: 100%;
+        }
+        .tv-card-title {
+            color: #21194d;
+            font-size: 1.05rem;
+            font-weight: 750;
+            margin-bottom: 10px;
+        }
+        .tv-level {
+            display: inline-block;
+            padding: 8px 14px;
+            border-radius: 11px;
+            background: #f2ebff;
+            color: #6639b7;
+            font-weight: 750;
+            margin-bottom: 8px;
+        }
+        .tv-finding {
+            padding: 5px 0;
+            color: #505668;
+            line-height: 1.45;
+            font-size: 0.93rem;
+        }
+        .tv-finding-dot {
+            color: #7144c6;
+            font-weight: 900;
+            padding-right: 7px;
+        }
+        .tv-rank-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 9px 2px;
+            border-bottom: 1px solid #f0eef6;
+            color: #424758;
+        }
+        .tv-rank-number {
+            display: inline-flex;
+            width: 24px;
+            height: 24px;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background: #7046c3;
+            color: white;
+            font-size: 0.75rem;
+            font-weight: 700;
+            margin-right: 8px;
+        }
+        .tv-section-caption {
+            color: #777c8d;
+            font-size: 0.88rem;
+            margin-top: -5px;
+            margin-bottom: 8px;
+        }
+        .tv-footer {
+            margin-top: 14px;
+            padding: 12px 16px;
+            background: #f7f3ff;
+            color: #6c6680;
+            border-radius: 12px;
+            font-size: 0.82rem;
+            text-align: center;
+        }
+        div[data-testid="stMetric"] {
+            background-color: transparent;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def normalize_province_name(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return ""
+
+    text = norm_text(value)
+
+    aliases = {
+        "santo domingo": "santo domingo de los tsachilas",
+        "sto domingo": "santo domingo de los tsachilas",
+        "santo domingo tsachilas": "santo domingo de los tsachilas",
+        "zamora": "zamora chinchipe",
+        "morona": "morona santiago",
+    }
+
+    # Se revisan primero los nombres oficiales completos.
+    for province in ECUADOR_PROVINCES:
+        if province in text:
+            return province
+
+    for alias, province in aliases.items():
+        if alias in text:
+            return province
+
+    return ""
+
+
+def detect_province_column(df: pd.DataFrame) -> str | None:
+    if df.empty:
+        return None
+
+    preferred = get_secret("PROVINCE_COLUMN", "")
+    return find_column(
+        df,
+        preferred,
+        [
+            "provincia donde",
+            "provincia de ubicación",
+            "provincia de ubicacion",
+            "provincia",
+        ],
+    )
+
+
+def detect_geopoint_column(df: pd.DataFrame) -> str | None:
+    if df.empty:
+        return None
+
+    preferred = get_secret("GEOPOINT_COLUMN", "")
+    if preferred:
+        col = find_column(df, preferred, [])
+        if col:
+            return col
+
+    terms = [
+        "geopoint",
+        "geopunto",
+        "geolocalizacion",
+        "geolocalización",
+        "georreferencia",
+        "georreferenciacion",
+        "georreferenciación",
+        "ubicacion gps",
+        "ubicación gps",
+        "coordenadas",
+        "gps",
+    ]
+    terms_norm = [norm_text(term) for term in terms]
+
+    for col in df.columns:
+        col_norm = norm_text(col)
+        if any(term in col_norm for term in terms_norm):
+            return col
+
+    return None
+
+
+def detect_lat_lon_columns(df: pd.DataFrame) -> tuple[str | None, str | None]:
+    if df.empty:
+        return None, None
+
+    lat_col = None
+    lon_col = None
+
+    for col in df.columns:
+        col_norm = norm_text(col)
+        col_id = norm_id(col)
+
+        if lat_col is None and (
+            col_id in {"lat", "latitude", "latitud", "geolocation0"}
+            or "latitude" in col_norm
+            or "latitud" in col_norm
+        ):
+            lat_col = col
+
+        if lon_col is None and (
+            col_id in {"lon", "lng", "longitude", "longitud", "geolocation1"}
+            or "longitude" in col_norm
+            or "longitud" in col_norm
+        ):
+            lon_col = col
+
+    return lat_col, lon_col
+
+
+def parse_ecuador_coordinates(value: Any) -> tuple[float | None, float | None]:
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return None, None
+
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        try:
+            lat = float(value[0])
+            lon = float(value[1])
+            if -5.5 <= lat <= 2.0 and -82.5 <= lon <= -74.0:
+                return lat, lon
+        except Exception:
+            pass
+
+    text = str(value).strip()
+    numbers = re.findall(r"-?\d+(?:\.\d+)?", text)
+
+    if len(numbers) < 2:
+        return None, None
+
+    try:
+        first = float(numbers[0])
+        second = float(numbers[1])
+    except Exception:
+        return None, None
+
+    if -5.5 <= first <= 2.0 and -82.5 <= second <= -74.0:
+        return first, second
+
+    if -82.5 <= first <= -74.0 and -5.5 <= second <= 2.0:
+        return second, first
+
+    return None, None
+
+
+def latest_public_records(df: pd.DataFrame, company_col: str | None) -> pd.DataFrame:
+    """Devuelve una observación por empresa para evitar doble conteo público."""
+    if df.empty:
+        return df.copy()
+
+    if not company_col or company_col not in df.columns:
+        return df.copy()
+
+    tmp = df.copy()
+    tmp["__company_public"] = tmp[company_col].apply(normalize_company)
+
+    date_candidates = [
+        c
+        for c in tmp.columns
+        if any(
+            k in norm_text(c)
+            for k in [
+                "fecha de envio",
+                "fecha de envío",
+                "submission",
+                "_submission_time",
+                "end",
+                "fin",
+            ]
+        )
+    ]
+
+    if date_candidates:
+        date_col = date_candidates[0]
+        tmp["__public_date"] = pd.to_datetime(tmp[date_col], errors="coerce")
+        tmp = tmp.sort_values(["__company_public", "__public_date"], na_position="first")
+
+    latest = tmp.drop_duplicates(subset=["__company_public"], keep="last").copy()
+    return latest.drop(columns=["__company_public", "__public_date"], errors="ignore")
+
+
+def get_public_latest_date(df: pd.DataFrame) -> str:
+    if df.empty:
+        return "Sin fecha"
+
+    candidates = [
+        c
+        for c in df.columns
+        if any(
+            k in norm_text(c)
+            for k in [
+                "fecha de envio",
+                "fecha de envío",
+                "submission",
+                "_submission_time",
+                "end",
+                "fin",
+            ]
+        )
+    ]
+
+    for col in candidates:
+        parsed = pd.to_datetime(df[col], errors="coerce")
+        if parsed.notna().any():
+            return parsed.max().strftime("%d/%m/%Y")
+
+    return "Sin fecha"
+
+
+def calculate_public_scores(
+    public_df: pd.DataFrame,
+) -> tuple[float | None, dict[int, float | None], list[float]]:
+    if public_df.empty:
+        return None, {p["id"]: None for p in PRINCIPLES}, []
+
+    principle_values: dict[int, list[float]] = {p["id"]: [] for p in PRINCIPLES}
+    company_totals: list[float] = []
+
+    for _, row in public_df.iterrows():
+        objective_scores = {
+            obj_id: objective_score(row, public_df, obj_id)
+            for obj_id in OBJECTIVES
+        }
+        p_scores = {
+            p["id"]: principle_score(row, public_df, p["id"], objective_scores)
+            for p in PRINCIPLES
+        }
+
+        valid_company_scores = [score for score in p_scores.values() if score is not None]
+        if valid_company_scores:
+            company_totals.append(float(np.mean(valid_company_scores)))
+
+        for pid, score in p_scores.items():
+            if score is not None:
+                principle_values[pid].append(score)
+
+    principle_average = {
+        pid: (float(np.mean(values)) if values else None)
+        for pid, values in principle_values.items()
+    }
+    total = float(np.mean(company_totals)) if company_totals else None
+
+    return total, principle_average, company_totals
+
+
+def public_level_counts(company_scores: list[float]) -> dict[str, int]:
+    counts = {
+        "Crítico": 0,
+        "Inicial": 0,
+        "En construcción": 0,
+        "Avanzado": 0,
+    }
+
+    for score in company_scores:
+        level = level_from_score(score)
+        if level in counts:
+            counts[level] += 1
+
+    return counts
+
+
+def public_province_counts(
+    public_df: pd.DataFrame,
+    province_col: str | None,
+) -> pd.DataFrame:
+    empty = pd.DataFrame(columns=["province_key", "Provincia", "Registros", "lat", "lon"])
+
+    if public_df.empty or not province_col or province_col not in public_df.columns:
+        return empty
+
+    province_series = public_df[province_col].apply(normalize_province_name)
+    counts = (
+        province_series[province_series != ""]
+        .value_counts()
+        .rename_axis("province_key")
+        .reset_index(name="Registros")
+    )
+
+    if counts.empty:
+        return empty
+
+    counts["Provincia"] = counts["province_key"].map(PROVINCE_DISPLAY)
+    counts["lat"] = counts["province_key"].apply(lambda x: ECUADOR_PROVINCES[x][0])
+    counts["lon"] = counts["province_key"].apply(lambda x: ECUADOR_PROVINCES[x][1])
+    return counts
+
+
+def public_georeferenced_points(public_df: pd.DataFrame) -> pd.DataFrame:
+    points: list[dict[str, Any]] = []
+
+    if public_df.empty:
+        return pd.DataFrame(columns=["lat", "lon", "Provincia"])
+
+    geopoint_col = detect_geopoint_column(public_df)
+    lat_col, lon_col = detect_lat_lon_columns(public_df)
+    province_col = detect_province_column(public_df)
+
+    for _, row in public_df.iterrows():
+        lat = None
+        lon = None
+
+        if geopoint_col:
+            lat, lon = parse_ecuador_coordinates(row.get(geopoint_col))
+
+        if (lat is None or lon is None) and lat_col and lon_col:
+            try:
+                test_lat = float(row.get(lat_col))
+                test_lon = float(row.get(lon_col))
+                if -5.5 <= test_lat <= 2.0 and -82.5 <= test_lon <= -74.0:
+                    lat = test_lat
+                    lon = test_lon
+            except Exception:
+                pass
+
+        if lat is None or lon is None:
+            continue
+
+        province = ""
+        if province_col:
+            key = normalize_province_name(row.get(province_col))
+            province = PROVINCE_DISPLAY.get(key, "")
+
+        points.append({"lat": lat, "lon": lon, "Provincia": province})
+
+    return pd.DataFrame(points)
+
+
+def public_map_figure(province_df: pd.DataFrame, geo_df: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+
+    if not province_df.empty:
+        max_count = max(float(province_df["Registros"].max()), 1.0)
+        province_sizes = 18 + (province_df["Registros"].astype(float) / max_count) * 28
+
+        fig.add_trace(
+            go.Scattermapbox(
+                lat=province_df["lat"],
+                lon=province_df["lon"],
+                mode="markers",
+                name="Empresas por provincia",
+                marker=dict(size=province_sizes, color="#7144C6", opacity=0.82),
+                text=[
+                    f"<b>{prov}</b><br>{int(count)} empresa{'s' if int(count) != 1 else ''}"
+                    for prov, count in zip(province_df["Provincia"], province_df["Registros"])
+                ],
+                hovertemplate="%{text}<extra></extra>",
+            )
+        )
+
+    if not geo_df.empty:
+        hover_text = []
+        for _, item in geo_df.iterrows():
+            province = str(item.get("Provincia", "")).strip()
+            hover_text.append(
+                f"Registro georreferenciado<br>{province}"
+                if province
+                else "Registro georreferenciado"
+            )
+
+        fig.add_trace(
+            go.Scattermapbox(
+                lat=geo_df["lat"],
+                lon=geo_df["lon"],
+                mode="markers",
+                name="Georreferencias",
+                marker=dict(size=10, color="#F47948", opacity=0.92),
+                text=hover_text,
+                hovertemplate="%{text}<extra></extra>",
+            )
+        )
+
+    fig.update_layout(
+        height=470,
+        margin=dict(l=0, r=0, t=0, b=0),
+        mapbox=dict(
+            style="open-street-map",
+            center=dict(lat=-1.45, lon=-78.25),
+            zoom=5.25,
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=0.01,
+            xanchor="left",
+            x=0.01,
+            bgcolor="rgba(255,255,255,0.85)",
+        ),
+    )
+    return fig
+
+
+def public_weps_figure(principle_scores: dict[int, float | None]) -> go.Figure:
+    labels = []
+    values = []
+    colors = []
+    text_values = []
+
+    for p in PRINCIPLES:
+        pid = p["id"]
+        score = principle_scores.get(pid)
+        short_title = p["title"] if len(p["title"]) <= 45 else p["title"][:42] + "..."
+
+        labels.append(f"WEP {pid} · {short_title}")
+        values.append(0 if score is None else score)
+        colors.append(color_from_score(score))
+        text_values.append("Sin cálculo" if score is None else f"{score:.1f}%")
+
+    fig = go.Figure(
+        go.Bar(
+            x=values,
+            y=labels,
+            orientation="h",
+            marker_color=colors,
+            text=text_values,
+            textposition="auto",
+            hoverinfo="skip",
+        )
+    )
+
+    fig.update_layout(
+        height=330,
+        margin=dict(l=10, r=10, t=15, b=25),
+        xaxis=dict(range=[0, 100], title="Avance promedio (%)", fixedrange=True, ticksuffix="%"),
+        yaxis=dict(autorange="reversed", fixedrange=True, automargin=True),
+        showlegend=False,
+        dragmode=False,
+    )
+    return fig
+
+
+def public_levels_figure(level_counts: dict[str, int]) -> go.Figure:
+    levels = ["Crítico", "Inicial", "En construcción", "Avanzado"]
+    counts = [level_counts.get(level, 0) for level in levels]
+    total = sum(counts)
+    percentages = [(count / total * 100 if total else 0) for count in counts]
+    colors = ["#DC2626", "#EA580C", "#E8B235", "#16A34A"]
+
+    fig = go.Figure(
+        go.Bar(
+            x=levels,
+            y=counts,
+            marker_color=colors,
+            text=[f"{pct:.0f}%<br>{count}" for pct, count in zip(percentages, counts)],
+            textposition="outside",
+            hovertemplate="%{x}<br>%{y} empresas<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        height=330,
+        margin=dict(l=10, r=10, t=35, b=25),
+        yaxis=dict(visible=False, fixedrange=True),
+        xaxis=dict(fixedrange=True),
+        showlegend=False,
+        dragmode=False,
+    )
+    return fig
+
+
+def render_public_summary(df: pd.DataFrame, company_col: str | None) -> None:
+    public_css()
+
+    # Para resultados institucionales se conserva la observación más reciente
+    # de cada empresa, evitando que una actualización duplique su peso.
+    public_df = latest_public_records(df, company_col)
+
+    total_score, principle_scores, company_scores = calculate_public_scores(public_df)
+    general_level = level_from_score(total_score)
+
+    province_col = detect_province_column(public_df)
+    province_df = public_province_counts(public_df, province_col)
+    geo_df = public_georeferenced_points(public_df)
+
+    companies = (
+        public_df[company_col].nunique()
+        if company_col and company_col in public_df.columns
+        else len(public_df)
+    )
+    surveys = len(df)
+    provinces = len(province_df)
+    last_update = get_public_latest_date(df)
+
+    # Encabezado
+    st.markdown(
+        f"""
+        <div class="tv-public-intro">
+            <h2>Resumen público</h2>
+            <p>
+                Resultados agregados del proceso Turismo Violeta ·
+                Última actualización: <b>{last_update}</b>
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # KPI principales
+    k1, k2, k3, k4, k5 = st.columns(5)
+    kpis = [
+        (k1, "Empresas participantes", companies, "Organizaciones registradas"),
+        (k2, "Registros recibidos", surveys, "Encuestas acumuladas"),
+        (k3, "Provincias con cobertura", provinces, "De 24 provincias del Ecuador"),
+        (k4, "Principios WEPs", 7, "Principios evaluados"),
+        (k5, "Indicadores analizados", 48, "Organizados en 13 objetivos"),
+    ]
+
+    for column, label, value, detail in kpis:
+        with column:
+            st.markdown(
+                f"""
+                <div class="tv-kpi">
+                    <div class="tv-kpi-label">{label}</div>
+                    <div class="tv-kpi-value">{value}</div>
+                    <div class="tv-kpi-detail">{detail}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.write("")
+
+    # Avance general + resultados destacados
+    left, right = st.columns([0.9, 1.35])
+
+    with left:
+        st.markdown(
+            '<div class="tv-card-title">Avance general del proceso</div>',
+            unsafe_allow_html=True,
+        )
+        d1, d2 = st.columns([0.85, 1.15])
+
+        with d1:
+            st.plotly_chart(
+                donut(total_score, "", height=235),
+                use_container_width=True,
+                config=CHART_CONFIG,
+                key="public_general_donut",
+            )
+
+        with d2:
+            st.markdown(
+                f"""
+                <div style="padding-top:34px;">
+                    <div class="tv-level">{general_level}</div>
+                    <div style="color:#565b6c; line-height:1.5; font-size:0.95rem; margin-top:7px;">
+                        El avance general resume el desempeño agregado de las empresas
+                        en los siete principios WEPs.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    valid_principles = [
+        (p["id"], p["title"], principle_scores.get(p["id"]))
+        for p in PRINCIPLES
+        if principle_scores.get(p["id"]) is not None
+    ]
+    strongest = max(valid_principles, key=lambda x: x[2]) if valid_principles else None
+
+    with right:
+        st.markdown(
+            """
+            <div class="tv-card">
+                <div class="tv-card-title">Logros y resultados destacados</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        findings = []
+        if provinces:
+            findings.append(f"Cobertura territorial registrada en {provinces} provincias del Ecuador.")
+        findings.append(f"{companies} empresas forman parte de la medición agregada.")
+        if total_score is not None:
+            findings.append(
+                f"El avance promedio general alcanza {total_score:.1f}% y se ubica en nivel {general_level}."
+            )
+        if strongest:
+            findings.append(
+                f"El mayor avance promedio corresponde al Principio WEPs {strongest[0]}, con {strongest[2]:.1f}%."
+            )
+        findings.append(
+            "La medición integra 7 principios WEPs, 13 objetivos y 48 indicadores para orientar planes de mejora y seguimiento."
+        )
+
+        for finding in findings:
+            st.markdown(
+                f"""
+                <div class="tv-finding">
+                    <span class="tv-finding-dot">●</span>{finding}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.write("")
+
+    # Cobertura territorial
+    st.markdown(
+        """
+        <div class="tv-card-title">Cobertura territorial y georreferenciación</div>
+        <div class="tv-section-caption">
+            Distribución territorial de las empresas y registros disponibles en KOBO.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    map_col, rank_col = st.columns([3.4, 1])
+
+    with map_col:
+        if not province_df.empty or not geo_df.empty:
+            st.plotly_chart(
+                public_map_figure(province_df, geo_df),
+                use_container_width=True,
+                config=PUBLIC_MAP_CONFIG,
+                key="public_ecuador_map",
+            )
+        else:
+            st.info(
+                "Aún no se detectaron campos de provincia o georreferenciación para construir el mapa."
+            )
+
+    with rank_col:
+        st.markdown(
+            """
+            <div class="tv-card">
+                <div class="tv-card-title">Provincias con más empresas</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if not province_df.empty:
+            ranking = province_df.sort_values("Registros", ascending=False).head(5)
+            for rank, (_, item) in enumerate(ranking.iterrows(), start=1):
+                st.markdown(
+                    f"""
+                    <div class="tv-rank-row">
+                        <span>
+                            <span class="tv-rank-number">{rank}</span>
+                            {item["Provincia"]}
+                        </span>
+                        <b>{int(item["Registros"])}</b>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.caption("Sin información provincial disponible.")
+
+        if not geo_df.empty:
+            st.markdown(
+                f"""
+                <div style="margin-top:15px; color:#767b8c; font-size:0.82rem;">
+                    📍 {len(geo_df)} registros cuentan con coordenadas geográficas.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.write("")
+
+    # Principios WEPs + niveles de avance
+    chart_left, chart_right = st.columns([1.25, 1])
+
+    with chart_left:
+        st.markdown(
+            '<div class="tv-card-title">Avance promedio por principio WEPs</div>',
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(
+            public_weps_figure(principle_scores),
+            use_container_width=True,
+            config=CHART_CONFIG,
+            key="public_weps_summary",
+        )
+
+    with chart_right:
+        st.markdown(
+            '<div class="tv-card-title">Distribución de empresas por nivel</div>',
+            unsafe_allow_html=True,
+        )
+        level_counts = public_level_counts(company_scores)
+        st.plotly_chart(
+            public_levels_figure(level_counts),
+            use_container_width=True,
+            config=CHART_CONFIG,
+            key="public_level_distribution",
+        )
+
+    # Pie
+    st.markdown(
+        """
+        <div class="tv-footer">
+            ☁ Actualización automática desde KOBO
+            &nbsp;&nbsp;·&nbsp;&nbsp;
+            Los resultados corresponden a información agregada y de carácter público.
+            &nbsp;&nbsp;·&nbsp;&nbsp;
+            La consulta detallada por empresa permanece protegida mediante código de acceso.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_diagnostics(df: pd.DataFrame, company_col: str | None, code_col: str | None) -> None:
