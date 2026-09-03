@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v18.5 mapa Ecuador profesional Leaflet"
+APP_VERSION = "v18.6 mapa Ecuador profesional Esri Leaflet"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -1979,9 +1979,10 @@ def render_professional_ecuador_map(
     """Renderiza un mapa Leaflet profesional centrado en Ecuador.
 
     El mapa se ejecuta dentro de un componente HTML aislado y no depende de
-    ``Scattermapbox``/``Scattermap`` de Plotly. Usa CartoDB Positron como mapa
-    base, OpenStreetMap como alternativa, marcadores agregados por provincia
-    y clustering de los puntos GPS exactos. No requiere token de Mapbox.
+    ``Scattermapbox``/``Scattermap`` de Plotly. Usa Esri World Topographic
+    como mapa base profesional, Esri World Street Map y OpenStreetMap como
+    alternativas, marcadores agregados por provincia y clustering de puntos
+    GPS exactos. No requiere token de Mapbox ni API key de CARTO.
     """
 
     province_points: list[dict[str, Any]] = []
@@ -2279,11 +2280,22 @@ def render_professional_ecuador_map(
                 maxZoom: 13
             }});
 
-            const cartoLight = L.tileLayer(
-                'https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png',
+            // Mapas base profesionales sin CARTO ni Mapbox.
+            // Esri Topographic se utiliza por defecto; si sus teselas fallan,
+            // el mapa cambia automáticamente a OpenStreetMap.
+            const esriTopo = L.tileLayer(
+                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{{z}}/{{y}}/{{x}}',
                 {{
-                    maxZoom: 20,
-                    attribution: '&copy; OpenStreetMap &copy; CARTO'
+                    maxZoom: 19,
+                    attribution: 'Tiles &copy; Esri &mdash; Sources: Esri, HERE, Garmin, USGS, NGA, EPA, NPS, INCREMENT P'
+                }}
+            );
+
+            const esriStreet = L.tileLayer(
+                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{{z}}/{{y}}/{{x}}',
+                {{
+                    maxZoom: 19,
+                    attribution: 'Tiles &copy; Esri'
                 }}
             );
 
@@ -2295,13 +2307,28 @@ def render_professional_ecuador_map(
                 }}
             );
 
-            cartoLight.addTo(map);
+            let baseLayer = esriTopo;
+            let esriTileErrors = 0;
+            esriTopo.on('tileerror', function() {{
+                esriTileErrors += 1;
+                if (esriTileErrors >= 4 && map.hasLayer(esriTopo)) {{
+                    map.removeLayer(esriTopo);
+                    osm.addTo(map);
+                    baseLayer = osm;
+                }}
+            }});
+
+            esriTopo.addTo(map);
             map.fitBounds(mainlandBounds, {{padding: [8, 8]}});
 
             L.control.zoom({{position: 'topright'}}).addTo(map);
             L.control.scale({{position: 'bottomright', imperial: false}}).addTo(map);
             L.control.layers(
-                {{'Mapa claro': cartoLight, 'OpenStreetMap': osm}},
+                {{
+                    'Topográfico': esriTopo,
+                    'Calles': esriStreet,
+                    'OpenStreetMap': osm
+                }},
                 null,
                 {{position: 'topright', collapsed: true}}
             ).addTo(map);
@@ -2410,11 +2437,26 @@ def render_professional_ecuador_map(
                     minZoom: 5,
                     maxZoom: 12
                 }});
-                cartoLight.clone = undefined;
-                L.tileLayer(
-                    'https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png',
-                    {{maxZoom: 20}}
-                ).addTo(galMap);
+                const galEsri = L.tileLayer(
+                    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{{z}}/{{y}}/{{x}}',
+                    {{
+                        maxZoom: 19,
+                        attribution: 'Tiles &copy; Esri'
+                    }}
+                );
+                const galOsm = L.tileLayer(
+                    'https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',
+                    {{maxZoom: 19}}
+                );
+                let galTileErrors = 0;
+                galEsri.on('tileerror', function() {{
+                    galTileErrors += 1;
+                    if (galTileErrors >= 3 && galMap.hasLayer(galEsri)) {{
+                        galMap.removeLayer(galEsri);
+                        galOsm.addTo(galMap);
+                    }}
+                }});
+                galEsri.addTo(galMap);
                 galMap.setView([-0.75, -90.55], 7);
 
                 galProvincePoints.forEach(p => {{
