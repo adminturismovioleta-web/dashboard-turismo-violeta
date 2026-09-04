@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v18.9 mapa territorial preciso y autoajustable"
+APP_VERSION = "v19.0 mapa interactivo por localidad y codigo KOBO"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -730,63 +730,103 @@ def detect_company_column(df: pd.DataFrame) -> str | None:
     )
 
 
+
 def detect_access_code_column(df: pd.DataFrame) -> str | None:
-    preferred = get_secret("ACCESS_CODE_COLUMN", "")
+    """Devuelve exclusivamente el campo de código definido por la encuesta.
+
+    El acceso empresarial debe validarse con la pregunta:
+    ``Cree_un_C_digo_de_ac_e_proceso_de_llenado``.
+    Nunca se utiliza ``_id``, UUID, ``instanceID`` ni otros identificadores
+    internos de KOBO como código de consulta.
+    """
     columns = detect_access_code_columns(df)
-    if preferred:
-        preferred_found = find_column(df, preferred, [])
-        if preferred_found:
-            return preferred_found
     return columns[0] if columns else None
 
 
 def detect_access_code_columns(df: pd.DataFrame) -> list[str]:
+    """Detecta el código de acceso creado por la organización.
+
+    Se prioriza el ``name`` exacto del XLSForm actualizado y se admite la
+    etiqueta completa de la pregunta como respaldo para exportaciones que
+    utilicen labels en lugar de nombres internos.
+    """
     if df.empty:
         return []
 
-    preferred = get_secret("ACCESS_CODE_COLUMN", "")
     ordered: list[str] = []
 
     def add(col: str | None) -> None:
         if col and col in df.columns and col not in ordered:
             ordered.append(col)
 
-    add(find_column(df, preferred, []))
+    # Campo interno exacto confirmado en el XLSForm.
+    exact_fields = [
+        "Cree_un_C_digo_de_ac_e_proceso_de_llenado",
+        "cree_un_c_digo_de_ac_e_proceso_de_llenado",
+    ]
+    for field_name in exact_fields:
+        add(find_field_column(df, field_name))
 
+    # Respaldo por etiqueta completa / fragmentos inequívocos.
+    exact_question = norm_text(
+        "Cree un código de acceso para poder ingresar posteriormente. "
+        "Debe contener al menos un número, una letra mayúscula y un signo. "
+        "Conserve este código al finalizar el proceso de llenado."
+    )
     strong_terms = [
-        "cree un codigo de acceso",
-        "cree un código de acceso",
-        "codigo de acceso",
-        "código de acceso",
-        "ingresar luego",
-        "codigo para poder ingresar",
-        "código para poder ingresar",
-        "necesario tener este codigo",
-        "necesario tener este código",
+        "cree un codigo de acceso para poder ingresar posteriormente",
+        "cree un código de acceso para poder ingresar posteriormente",
+        "conserve este codigo al finalizar el proceso de llenado",
+        "conserve este código al finalizar el proceso de llenado",
+        "cree_un_c_digo_de_ac_e_proceso_de_llenado",
     ]
     strong_terms_norm = [norm_text(x) for x in strong_terms]
-    for col in df.columns:
-        col_norm = norm_text(col)
-        if any(term in col_norm for term in strong_terms_norm):
-            add(col)
 
     for col in df.columns:
         col_norm = norm_text(col)
-        if col_norm in {"codigo", "código", "codigo_acceso", "codigo acceso", "_id", "uuid", "meta/instanceid", "instanceid"}:
+        col_id = norm_id(col)
+
+        if exact_question and exact_question in col_norm:
+            add(col)
+            continue
+
+        if any(term and term in col_norm for term in strong_terms_norm):
+            add(col)
+            continue
+
+        if "creeuncdigodeaceprocesodellenado" in col_id:
             add(col)
 
+    # NO agregar _id, uuid, instanceid ni identificadores técnicos.
     return ordered
 
 
 def normalize_access_code(value: Any) -> str:
+    """Normaliza el código sin destruir letras, números ni signos.
+
+    Se eliminan únicamente espacios accidentales y caracteres invisibles.
+    La comparación conserva mayúsculas/minúsculas, porque el código funciona
+    como credencial y la propia encuesta exige al menos una letra mayúscula.
+    """
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return ""
+
     text = str(value)
     text = unicodedata.normalize("NFKC", text)
-    text = text.replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
-    text = text.replace("\xa0", " ").strip().strip('"').strip("'").strip()
+    text = (
+        text.replace("\u200b", "")
+        .replace("\u200c", "")
+        .replace("\u200d", "")
+        .replace("\ufeff", "")
+        .replace("\xa0", " ")
+        .strip()
+        .strip('"')
+        .strip("'")
+        .strip()
+    )
     text = re.sub(r"\s+", "", text)
 
+    # Respaldo para conversiones de Excel en valores puramente numéricos.
     numeric_like = text.replace(",", ".")
     if re.fullmatch(r"\d+\.0+", numeric_like):
         numeric_like = numeric_like.split(".", 1)[0]
@@ -795,11 +835,16 @@ def normalize_access_code(value: Any) -> str:
             numeric_like = str(int(float(numeric_like)))
         except Exception:
             pass
-    text = numeric_like
-    return text.upper()
+
+    return numeric_like
 
 
-def find_valid_records_by_code(company_records: pd.DataFrame, code_columns: list[str], typed_code: str) -> tuple[pd.DataFrame, str | None]:
+def find_valid_records_by_code(
+    company_records: pd.DataFrame,
+    code_columns: list[str],
+    typed_code: str,
+) -> tuple[pd.DataFrame, str | None]:
+    """Busca el código únicamente en el campo de acceso de la encuesta."""
     typed_norm = normalize_access_code(typed_code)
     if not typed_norm:
         return company_records.iloc[0:0], None
@@ -807,6 +852,7 @@ def find_valid_records_by_code(company_records: pd.DataFrame, code_columns: list
     for col in code_columns:
         if col not in company_records.columns:
             continue
+
         normalized_series = company_records[col].apply(normalize_access_code)
         mask = normalized_series == typed_norm
         if mask.any():
@@ -1066,7 +1112,7 @@ def render_company_view(df: pd.DataFrame, company_col: str | None, code_col: str
 
     code_columns = detect_access_code_columns(df)
     if not code_columns:
-        st.error("No se detectó ninguna columna de código de acceso. Revise que el formulario exporte el campo 'Código de acceso'.")
+        st.error("No se detectó el campo de acceso 'Cree_un_C_digo_de_ac_e_proceso_de_llenado' en la exportación de KOBO.")
         return
 
     visible_by_norm: dict[str, str] = {}
@@ -1091,7 +1137,7 @@ def render_company_view(df: pd.DataFrame, company_col: str | None, code_col: str
     if not typed_code:
         st.info("Seleccione la empresa y escriba el código de acceso creado al final de la encuesta.")
         with st.expander("Ayuda rápida"):
-            st.write("La app compara el código ignorando espacios accidentales, mayúsculas/minúsculas y conversiones de Excel como .0.")
+            st.write("La app valida exclusivamente el código creado en la pregunta de acceso de la encuesta. Se eliminan espacios accidentales, pero se respetan mayúsculas, minúsculas y signos.")
             st.write(f"Columna de empresa detectada: {company_col}")
             st.write(f"Columnas de código detectadas: {', '.join(code_columns)}")
         return
@@ -1103,7 +1149,7 @@ def render_company_view(df: pd.DataFrame, company_col: str | None, code_col: str
         with st.expander("Ayuda rápida"):
             st.write(f"Columna usada como empresa: {company_col}")
             st.write(f"Columnas revisadas como código: {', '.join(code_columns)}")
-            st.write("El código se compara de forma robusta: sin espacios, sin .0 de Excel y sin diferenciar mayúsculas/minúsculas.")
+            st.write("El código se compara contra el campo de acceso de la encuesta: sin espacios accidentales y respetando mayúsculas, minúsculas y signos.")
             st.write("Si acabas de enviar la encuesta, presiona 'Actualizar datos desde KOBO'.")
             admin_pw = st.text_input("Clave de administrador para ver códigos disponibles de esta empresa", type="password", key="admin_code_debug")
             if admin_pw == get_secret("ADMIN_PASSWORD", "TurismoVioleta2026"):
@@ -2163,97 +2209,214 @@ def public_georeferenced_points(public_df: pd.DataFrame) -> pd.DataFrame:
 
 
 
+
+def _set_public_map_province(province: str) -> None:
+    """Activa una vista provincial del mapa."""
+    st.session_state["tv_map_focus_province"] = str(province or "")
+    st.session_state["tv_map_focus_lat"] = None
+    st.session_state["tv_map_focus_lon"] = None
+    st.session_state["tv_map_focus_label"] = ""
+
+
+def _set_public_map_locality(
+    province: str,
+    lat: float,
+    lon: float,
+    label: str,
+) -> None:
+    """Activa una vista puntual sobre una localidad georreferenciada."""
+    st.session_state["tv_map_focus_province"] = str(province or "")
+    st.session_state["tv_map_focus_lat"] = float(lat)
+    st.session_state["tv_map_focus_lon"] = float(lon)
+    st.session_state["tv_map_focus_label"] = str(label or "Localidad georreferenciada")
+
+
+def _reset_public_map_focus() -> None:
+    """Restablece la vista nacional."""
+    st.session_state["tv_map_focus_province"] = ""
+    st.session_state["tv_map_focus_lat"] = None
+    st.session_state["tv_map_focus_lon"] = None
+    st.session_state["tv_map_focus_label"] = ""
+
+
 def render_professional_ecuador_map(
     province_df: pd.DataFrame,
     locality_geo_df: pd.DataFrame,
     company_geo_df: pd.DataFrame,
     height: int = 540,
+    focus_province: str = "",
+    focus_lat: float | None = None,
+    focus_lon: float | None = None,
+    focus_label: str = "",
 ) -> None:
-    """Mapa nativo de Streamlit con jerarquía territorial precisa y discreta.
+    """Mapa nativo de Streamlit con foco provincial y por localidad.
 
-    Violeta sólido = localidad operativa GPS (15.4.1).
-    Naranja = dirección principal GPS (5.1).
-    Violeta translúcido = cobertura provincial contextual.
+    Jerarquía cartográfica:
+    1. Morado intenso: geopuntos exactos de localidades operativas (15.4.1).
+    2. Naranja: dirección principal de la empresa (5.1).
+    3. Morado medio: cobertura provincial contextual cuando todavía no existe
+       geopunto de localidad.
+
+    Los círculos son deliberadamente discretos. El tamaño crece de forma
+    logarítmica con el número de registros para evitar burbujas gigantes.
     """
     rows: list[dict[str, Any]] = []
 
-    # Cobertura provincial contextual. st.map interpreta ``size`` en metros.
-    # Se limita deliberadamente a una escala pequeña y logarítmica.
-    if not province_df.empty:
-        for _, item in province_df.iterrows():
-            try:
-                lat = float(item.get("lat"))
-                lon = float(item.get("lon"))
-                count = max(1.0, float(item.get("Registros", 1) or 1))
-            except Exception:
-                continue
-            if not (-5.5 <= lat <= 2.2 and -92.5 <= lon <= -74.0):
-                continue
+    focus_province = str(focus_province or "").strip()
+    focus_label = str(focus_label or "").strip()
+    has_point_focus = focus_lat is not None and focus_lon is not None
 
-            # 1 registro ≈ 1,15 km; crecimiento lento; máximo 2,1 km.
-            size_m = min(2100.0, 820.0 + 480.0 * float(np.log1p(count)))
-            rows.append({
-                "lat": lat,
-                "lon": lon,
-                "color": "#6F44C24A",
-                "size": size_m,
-                "tipo": "Cobertura provincial",
-                "detalle": f"{item.get('Provincia', 'Provincia')}: {int(count)} registro(s)",
-            })
-
-    # Prioridad 1: geopuntos exactos de cada localidad operativa.
-    if not locality_geo_df.empty:
-        for _, item in locality_geo_df.iterrows():
-            try:
-                lat = float(item.get("lat"))
-                lon = float(item.get("lon"))
-            except Exception:
-                continue
-            if not (-5.5 <= lat <= 2.2 and -92.5 <= lon <= -74.0):
-                continue
-
-            rows.append({
-                "lat": lat,
-                "lon": lon,
-                "color": "#6F44C2E6",
-                "size": 950.0,
+    # --------------------------------------------------------
+    # Vista puntual: una localidad seleccionada.
+    # --------------------------------------------------------
+    if has_point_focus:
+        rows.append(
+            {
+                "lat": float(focus_lat),
+                "lon": float(focus_lon),
+                "color": "#5B21B6FF",
+                "size": 720.0,
                 "tipo": "Localidad operativa GPS",
-                "detalle": str(item.get("Referencia", "Localidad georreferenciada")),
-            })
+                "detalle": focus_label or "Localidad georreferenciada",
+            }
+        )
 
-    # Prioridad 2: dirección principal de la empresa.
-    if not company_geo_df.empty:
-        for _, item in company_geo_df.iterrows():
-            try:
-                lat = float(item.get("lat"))
-                lon = float(item.get("lon"))
-            except Exception:
-                continue
-            if not (-5.5 <= lat <= 2.2 and -92.5 <= lon <= -74.0):
-                continue
+        if focus_label:
+            st.caption(f"📍 Vista enfocada: {focus_label}")
 
-            province = str(item.get("Provincia", "") or "").strip()
-            rows.append({
-                "lat": lat,
-                "lon": lon,
-                "color": "#F47A48E6",
-                "size": 800.0,
-                "tipo": "Dirección principal GPS",
-                "detalle": province or "Dirección principal georreferenciada",
-            })
+        map_df = pd.DataFrame(rows)
+        zoom = 12
 
-    if not rows:
-        st.info("No hay coordenadas territoriales válidas para representar en el mapa.")
-        return
+    else:
+        # ----------------------------------------------------
+        # Cobertura provincial contextual.
+        # ----------------------------------------------------
+        province_source = province_df.copy()
 
-    map_df = pd.DataFrame(rows)
+        if focus_province and not province_source.empty:
+            province_source = province_source[
+                province_source["Provincia"].astype(str).str.strip() == focus_province
+            ].copy()
+
+        if not province_source.empty:
+            for _, item in province_source.iterrows():
+                try:
+                    lat = float(item.get("lat"))
+                    lon = float(item.get("lon"))
+                    count = max(1.0, float(item.get("Registros", 1) or 1))
+                except Exception:
+                    continue
+
+                if not (-5.5 <= lat <= 2.2 and -92.5 <= lon <= -74.0):
+                    continue
+
+                # 1 registro ≈ 430 m. Crecimiento lento y tope inferior a 900 m.
+                size_m = min(
+                    880.0,
+                    320.0 + 160.0 * float(np.log1p(count)),
+                )
+
+                rows.append(
+                    {
+                        "lat": lat,
+                        "lon": lon,
+                        "color": "#5B21B6D9",
+                        "size": size_m,
+                        "tipo": "Cobertura provincial",
+                        "detalle": f"{item.get('Provincia', 'Provincia')}: {int(count)} registro(s)",
+                    }
+                )
+
+        # ----------------------------------------------------
+        # Geopuntos exactos de localidades.
+        # ----------------------------------------------------
+        locality_source = locality_geo_df.copy()
+
+        if focus_province and not locality_source.empty:
+            locality_source = locality_source[
+                locality_source["Provincia"].astype(str).str.strip() == focus_province
+            ].copy()
+
+        if not locality_source.empty:
+            for _, item in locality_source.iterrows():
+                try:
+                    lat = float(item.get("lat"))
+                    lon = float(item.get("lon"))
+                except Exception:
+                    continue
+
+                if not (-5.5 <= lat <= 2.2 and -92.5 <= lon <= -74.0):
+                    continue
+
+                rows.append(
+                    {
+                        "lat": lat,
+                        "lon": lon,
+                        "color": "#5B21B6FF",
+                        "size": 620.0 if not focus_province else 680.0,
+                        "tipo": "Localidad operativa GPS",
+                        "detalle": str(
+                            item.get("Referencia", "Localidad georreferenciada")
+                        ),
+                    }
+                )
+
+        # ----------------------------------------------------
+        # Dirección principal, como referencia complementaria.
+        # ----------------------------------------------------
+        company_source = company_geo_df.copy()
+
+        if focus_province and not company_source.empty and "Provincia" in company_source.columns:
+            company_source = company_source[
+                company_source["Provincia"].astype(str).str.strip() == focus_province
+            ].copy()
+
+        if not company_source.empty:
+            for _, item in company_source.iterrows():
+                try:
+                    lat = float(item.get("lat"))
+                    lon = float(item.get("lon"))
+                except Exception:
+                    continue
+
+                if not (-5.5 <= lat <= 2.2 and -92.5 <= lon <= -74.0):
+                    continue
+
+                province = str(item.get("Provincia", "") or "").strip()
+                rows.append(
+                    {
+                        "lat": lat,
+                        "lon": lon,
+                        "color": "#F47A48F2",
+                        "size": 470.0,
+                        "tipo": "Dirección principal GPS",
+                        "detalle": province or "Dirección principal georreferenciada",
+                    }
+                )
+
+        if not rows:
+            st.info("No hay coordenadas territoriales válidas para representar en el mapa.")
+            return
+
+        map_df = pd.DataFrame(rows)
+
+        if focus_province:
+            st.caption(
+                f"📌 Vista provincial: {focus_province}. "
+                "Los puntos morados sólidos corresponden a localidades con GPS."
+            )
+            province_points = locality_source if not locality_source.empty else province_source
+            zoom = max(8, _map_zoom_from_points(province_points))
+        else:
+            exact_for_zoom = locality_geo_df if not locality_geo_df.empty else company_geo_df
+            zoom = _map_zoom_from_points(exact_for_zoom, company_geo_df, province_df)
 
     st.markdown(
         """
         <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap;
                     margin:0 0 8px 2px; color:#5f6472; font-size:0.82rem;">
             <span style="display:flex;align-items:center;gap:7px;">
-                <span style="width:11px;height:11px;border-radius:50%;background:#6F44C2;display:inline-block;"></span>
+                <span style="width:11px;height:11px;border-radius:50%;background:#5B21B6;display:inline-block;"></span>
                 Localidad operativa GPS
             </span>
             <span style="display:flex;align-items:center;gap:7px;">
@@ -2261,7 +2424,7 @@ def render_professional_ecuador_map(
                 Dirección principal GPS
             </span>
             <span style="display:flex;align-items:center;gap:7px;">
-                <span style="width:10px;height:10px;border-radius:50%;background:#6F44C24A;display:inline-block;border:1px solid #6F44C2;"></span>
+                <span style="width:10px;height:10px;border-radius:50%;background:#5B21B6D9;display:inline-block;border:1px solid #4C1D95;"></span>
                 Cobertura provincial (referencia)
             </span>
         </div>
@@ -2269,24 +2432,20 @@ def render_professional_ecuador_map(
         unsafe_allow_html=True,
     )
 
-    # El zoom se adapta a la dispersión de los puntos exactos. Si solo existe una
-    # localidad se acerca; si hay varias provincias o Galápagos se abre la vista.
-    exact_for_zoom = locality_geo_df if not locality_geo_df.empty else company_geo_df
-    zoom = _map_zoom_from_points(exact_for_zoom, company_geo_df, province_df)
-
     common_kwargs = dict(
         data=map_df,
         latitude="lat",
         longitude="lon",
         color="color",
         size="size",
-        zoom=zoom,
+        zoom=int(max(1, min(15, zoom))),
     )
 
     try:
         st.map(**common_kwargs, width="stretch", height=height)
     except TypeError:
         st.map(**common_kwargs, use_container_width=True)
+
 
 def public_weps_figure(principle_scores: dict[int, float | None]) -> go.Figure:
     labels = []
@@ -2516,6 +2675,12 @@ def render_public_summary(
 
     st.write("")
 
+    # Estado de navegación cartográfica.
+    focus_province = str(st.session_state.get("tv_map_focus_province", "") or "").strip()
+    focus_lat = st.session_state.get("tv_map_focus_lat")
+    focus_lon = st.session_state.get("tv_map_focus_lon")
+    focus_label = str(st.session_state.get("tv_map_focus_label", "") or "").strip()
+
     # Cobertura territorial
     st.markdown(
         """
@@ -2536,6 +2701,10 @@ def render_public_summary(
                 locality_geo_df,
                 geo_df,
                 height=540,
+                focus_province=focus_province,
+                focus_lat=focus_lat,
+                focus_lon=focus_lon,
+                focus_label=focus_label,
             )
         else:
             st.info(
@@ -2551,23 +2720,139 @@ def render_public_summary(
             unsafe_allow_html=True,
         )
 
+        reset_col, _ = st.columns([0.62, 0.38])
+        with reset_col:
+            st.button(
+                "↺ Ver todo Ecuador",
+                key="tv_map_reset",
+                on_click=_reset_public_map_focus,
+                use_container_width=True,
+            )
+
         if not province_df.empty:
-            ranking = province_df.sort_values("Registros", ascending=False).head(5)
+            ranking = province_df.sort_values(
+                ["Registros", "Provincia"],
+                ascending=[False, True],
+            ).head(8)
+
             for rank, (_, item) in enumerate(ranking.iterrows(), start=1):
+                province_name = str(item["Provincia"])
+                count_value = int(item["Registros"])
+
+                c_rank, c_name, c_count, c_action = st.columns(
+                    [0.14, 0.48, 0.12, 0.26],
+                    vertical_alignment="center",
+                )
+
+                with c_rank:
+                    st.markdown(
+                        f"<span class='tv-rank-number'>{rank}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                with c_name:
+                    if focus_province == province_name:
+                        st.markdown(f"**{province_name}**")
+                    else:
+                        st.write(province_name)
+
+                with c_count:
+                    st.markdown(f"**{count_value}**")
+
+                with c_action:
+                    st.button(
+                        "Ver",
+                        key=f"tv_province_{norm_id(province_name)}",
+                        help=f"Mostrar localidades de {province_name} y acercar el mapa.",
+                        on_click=_set_public_map_province,
+                        args=(province_name,),
+                        use_container_width=True,
+                    )
+
                 st.markdown(
-                    f"""
-                    <div class="tv-rank-row">
-                        <span>
-                            <span class="tv-rank-number">{rank}</span>
-                            {item["Provincia"]}
-                        </span>
-                        <b>{int(item["Registros"])}</b>
-                    </div>
-                    """,
+                    "<div style='border-bottom:1px solid #f0eef6; margin:1px 0 7px 0;'></div>",
                     unsafe_allow_html=True,
                 )
         else:
             st.caption("Sin información provincial disponible.")
+
+        # Cuando se selecciona una provincia se muestra el detalle territorial
+        # más específico disponible y cada localidad puede enfocar el mapa.
+        if focus_province:
+            st.markdown(
+                f"""
+                <div style="margin-top:14px; color:#21194d; font-size:0.91rem; font-weight:800;">
+                    Localidades en {focus_province}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            province_localities = locality_geo_df.copy()
+            if not province_localities.empty:
+                province_localities = province_localities[
+                    province_localities["Provincia"].astype(str).str.strip()
+                    == focus_province
+                ].copy()
+
+            if not province_localities.empty:
+                province_localities = province_localities.sort_values(
+                    ["Canton", "Parroquia", "Localidad", "Referencia"],
+                    na_position="last",
+                )
+
+                for idx, (_, loc) in enumerate(
+                    province_localities.head(12).iterrows(),
+                    start=1,
+                ):
+                    reference = str(
+                        loc.get("Referencia", "Localidad georreferenciada") or
+                        "Localidad georreferenciada"
+                    ).strip()
+                    activity = str(loc.get("Actividad", "") or "").strip()
+
+                    l_text, l_action = st.columns(
+                        [0.76, 0.24],
+                        vertical_alignment="center",
+                    )
+
+                    with l_text:
+                        st.markdown(
+                            f"<div style='font-size:0.80rem; line-height:1.35; color:#4f5565;'>"
+                            f"<b>{idx}. {reference}</b>"
+                            f"{('<br><span style=\"color:#7b8090;\">' + activity + '</span>') if activity else ''}"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                    with l_action:
+                        st.button(
+                            "📍",
+                            key=(
+                                f"tv_locality_{norm_id(focus_province)}_"
+                                f"{idx}_{round(float(loc['lat']), 5)}_"
+                                f"{round(float(loc['lon']), 5)}"
+                            ),
+                            help=f"Acercar el mapa a {reference}.",
+                            on_click=_set_public_map_locality,
+                            args=(
+                                focus_province,
+                                float(loc["lat"]),
+                                float(loc["lon"]),
+                                reference,
+                            ),
+                            use_container_width=True,
+                        )
+
+                    st.markdown(
+                        "<div style='border-bottom:1px solid #f4f2f8; margin:4px 0 6px 0;'></div>",
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.caption(
+                    "La provincia tiene cobertura declarada, pero todavía no hay "
+                    "geopuntos válidos de localidad en los registros disponibles."
+                )
 
         if province_source == "repeat" and province_repeat_sheets:
             st.markdown(
@@ -2579,7 +2864,7 @@ def render_public_summary(
                 unsafe_allow_html=True,
             )
 
-        if not locality_geo_df.empty:
+        if not locality_geo_df.empty and not focus_province:
             st.markdown(
                 f"""
                 <div style="margin-top:12px; color:#21194d; font-size:0.88rem; font-weight:700;">
@@ -2646,7 +2931,7 @@ def render_public_summary(
             &nbsp;&nbsp;·&nbsp;&nbsp;
             Los resultados corresponden a información agregada y de carácter público.
             &nbsp;&nbsp;·&nbsp;&nbsp;
-            La consulta detallada por empresa permanece protegida mediante código de acceso.
+            La consulta detallada por empresa permanece protegida mediante el código creado por la organización en la encuesta.
         </div>
         """,
         unsafe_allow_html=True,
@@ -2669,8 +2954,8 @@ def render_diagnostics(
     st.write(f"Filas cargadas: {len(df)}")
     st.write(f"Columnas cargadas: {len(df.columns)}")
     st.write(f"Columna empresa detectada: {company_col}")
-    st.write(f"Columna código principal detectada: {code_col}")
-    st.write(f"Todas las columnas posibles de código: {detect_access_code_columns(df)}")
+    st.write(f"Campo de acceso de la encuesta detectado: {code_col}")
+    st.write(f"Columnas válidas para código de acceso: {detect_access_code_columns(df)}")
 
     repeat_sheets = repeat_sheets or {}
     st.write(f"Hojas repeat detectadas: {list(repeat_sheets.keys()) if repeat_sheets else 'Ninguna'}")
