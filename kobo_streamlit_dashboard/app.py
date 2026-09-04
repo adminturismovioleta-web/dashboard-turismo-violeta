@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v19.1 acceso KOBO robusto y mapa por localidad"
+APP_VERSION = "v19.2 acceso por codigo KOBO autodetectado"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -916,6 +916,125 @@ def find_global_records_by_code(
     """
     return find_valid_records_by_code(df, code_columns, typed_code)
 
+
+def _is_forbidden_access_column(col: Any) -> bool:
+    """Excluye identificadores técnicos y campos que nunca deben actuar como clave."""
+    cid = norm_id(col)
+    technical = {
+        "id", "uuid", "instanceid", "instance_id", "metainstanceid",
+        "submissionid", "submission_id", "formhubuuid", "index",
+        "xformidstring", "xform_id_string",
+    }
+    if cid in {norm_id(x) for x in technical}:
+        return True
+    if any(cid.endswith(x) for x in ["instanceid", "submissionid", "formhubuuid"]):
+        return True
+    return False
+
+
+def _access_column_score(col: Any) -> int:
+    """Puntúa qué tan plausible es que una columna sea el código de acceso."""
+    if _is_forbidden_access_column(col):
+        return -10000
+
+    raw = str(col)
+    ntext = norm_text(raw)
+    nid = norm_id(raw)
+    score = 0
+
+    exact_current = norm_id("Cree_un_C_digo_de_ac_e_proceso_de_llenado")
+    if nid == exact_current or nid.endswith(exact_current):
+        score += 1000
+
+    phrases = [
+        "cree un codigo de acceso",
+        "cree un código de acceso",
+        "codigo de acceso para poder ingresar",
+        "código de acceso para poder ingresar",
+        "ingresar posteriormente",
+        "conserve este codigo",
+        "conserve este código",
+    ]
+    if any(norm_text(p) in ntext for p in phrases):
+        score += 700
+
+    if "codigo" in nid or "cdigo" in nid or "clave" in nid or "accesscode" in nid:
+        score += 250
+    if "acceso" in nid or "ingresar" in nid or "llenado" in nid or "aceproceso" in nid:
+        score += 180
+
+    # Campos claramente ajenos a credenciales reciben una penalización.
+    if any(k in nid for k in [
+        "score", "nivel", "porcentaje", "percent", "total", "fecha",
+        "latitude", "longitude", "geopoint", "geopunto", "telefono", "cedula",
+    ]):
+        score -= 300
+
+    return score
+
+
+def find_access_records_autodetect(
+    records: pd.DataFrame,
+    typed_code: str,
+    preferred_columns: list[str] | None = None,
+) -> tuple[pd.DataFrame, str | None, list[str]]:
+    """Encuentra el código aunque KOBO haya cambiado el encabezado exportado.
+
+    Primero prueba las columnas detectadas por nombre. Si no encuentra coincidencia,
+    revisa dinámicamente todas las columnas no técnicas del DataFrame buscando el
+    valor escrito. Así se evita depender de cómo KOBO nombre o prefije el campo en
+    cada versión/exportación, sin volver a aceptar _id, UUID o instanceID.
+    """
+    if records.empty or not normalize_access_code(typed_code):
+        return records.iloc[0:0], None, []
+
+    preferred_columns = [
+        c for c in (preferred_columns or [])
+        if c in records.columns and not _is_forbidden_access_column(c)
+    ]
+
+    # 1) Ruta normal: campo de código conocido/detectado.
+    direct, direct_col = find_valid_records_by_code(records, preferred_columns, typed_code)
+    if not direct.empty:
+        return direct, direct_col, [direct_col] if direct_col else []
+
+    # 2) Autodetección por valor.
+    matches: list[tuple[int, str, pd.Series]] = []
+    for col in records.columns:
+        if col in preferred_columns or _is_forbidden_access_column(col):
+            continue
+        try:
+            mask = _code_mask(records[col], typed_code)
+        except Exception:
+            continue
+        if bool(mask.any()):
+            matches.append((_access_column_score(col), str(col), mask))
+
+    if not matches:
+        return records.iloc[0:0], None, []
+
+    matches.sort(key=lambda item: item[0], reverse=True)
+    matched_names = [m[1] for m in matches]
+    best_score, best_col, best_mask = matches[0]
+
+    # Si existe una columna semánticamente plausible, se prioriza siempre.
+    if best_score > 0:
+        return records.loc[best_mask].copy(), best_col, matched_names
+
+    # Si solo una columna no técnica contiene el valor, es razonable asumir que es
+    # la credencial aunque KOBO haya exportado un encabezado totalmente inesperado.
+    if len(matches) == 1:
+        return records.loc[best_mask].copy(), best_col, matched_names
+
+    # Si varias columnas contienen el mismo valor pero conducen exactamente al mismo
+    # registro, se acepta el registro sin convertir IDs técnicos en contraseña.
+    index_sets = [set(records.index[m[2]]) for m in matches]
+    common = set.intersection(*index_sets) if index_sets else set()
+    if common:
+        return records.loc[sorted(common)].copy(), best_col, matched_names
+
+    return records.iloc[0:0], None, matched_names
+
 def normalize_company(value: Any) -> str:
     text = unicodedata.normalize("NFKC", str(value or "")).replace("\xa0", " ").strip()
     return re.sub(r"\s+", " ", text).casefold()
@@ -1203,18 +1322,19 @@ def render_company_view(df: pd.DataFrame, company_col: str | None, code_col: str
             st.write(f"Columnas de código detectadas: {', '.join(code_columns)}")
         return
 
-    # 1) Intento normal: empresa seleccionada + código.
-    valid_records, matched_code_col = find_valid_records_by_code(
-        company_records, code_columns, typed_code
+    # 1) Intento normal y autodetectado dentro de la empresa seleccionada.
+    valid_records, matched_code_col, local_value_matches = find_access_records_autodetect(
+        company_records, typed_code, code_columns
     )
     resolved_company = selected_company
 
-    # 2) Respaldo robusto: el código es la credencial primaria. Si la respuesta
-    # histórica quedó asociada a una variante del nombre empresarial, buscamos
-    # el código globalmente y resolvemos la empresa real de ese registro.
+    # 2) Respaldo global: el código es la credencial primaria. Si KOBO cambió el
+    # encabezado exportado o el nombre de empresa varió, se localiza el valor en
+    # toda la tabla sin aceptar _id/UUID/instanceID como contraseña.
+    global_value_matches: list[str] = []
     if valid_records.empty:
-        global_matches, global_code_col = find_global_records_by_code(
-            df, code_columns, typed_code
+        global_matches, global_code_col, global_value_matches = find_access_records_autodetect(
+            df, typed_code, code_columns
         )
 
         if not global_matches.empty:
@@ -1254,10 +1374,26 @@ def render_company_view(df: pd.DataFrame, company_col: str | None, code_col: str
         )
         with st.expander("Ayuda rápida"):
             st.write(f"Columna usada como empresa: {company_col}")
-            st.write(f"Columnas revisadas como código: {', '.join(code_columns)}")
+            st.write(f"Columnas detectadas por nombre como código: {', '.join(code_columns)}")
+            if local_value_matches:
+                st.write(
+                    "Columnas no técnicas de esta empresa donde apareció el valor ingresado: "
+                    + ", ".join(local_value_matches)
+                )
+            elif global_value_matches:
+                st.write(
+                    "Columnas no técnicas de la exportación donde apareció el valor ingresado: "
+                    + ", ".join(global_value_matches)
+                )
+            else:
+                st.warning(
+                    "El valor ingresado no aparece en ninguna columna no técnica de la exportación cargada. "
+                    "Si el código sí existe en KOBO, la URL de exportación configurada en KOBO_DATA_URL "
+                    "probablemente está desactualizada o no incluye esa pregunta."
+                )
             st.write(
-                "La app revisa el campo actual y alias históricos del código de acceso, corrige espacios invisibles "
-                "y conversiones numéricas de Excel, pero nunca usa _id/UUID como contraseña."
+                "La app prioriza el campo actual del código y, como respaldo, autodetecta el valor en columnas no técnicas. "
+                "Nunca usa _id, UUID ni instanceID como contraseña."
             )
             admin_pw = st.text_input(
                 "Clave de administrador para revisar el valor exportado para esta empresa",
@@ -3083,7 +3219,21 @@ def render_diagnostics(
     st.write(f"Columnas cargadas: {len(df.columns)}")
     st.write(f"Columna empresa detectada: {company_col}")
     st.write(f"Campo de acceso de la encuesta detectado: {code_col}")
-    st.write(f"Columnas válidas para código de acceso: {detect_access_code_columns(df)}")
+    valid_code_cols = detect_access_code_columns(df)
+    st.write(f"Columnas válidas para código de acceso: {valid_code_cols}")
+    if valid_code_cols:
+        code_debug = []
+        for col in valid_code_cols:
+            if col in df.columns:
+                nonempty = df[col].apply(normalize_access_code).ne("")
+                code_debug.append({
+                    "columna": col,
+                    "valores no vacíos": int(nonempty.sum()),
+                    "valores únicos": int(df.loc[nonempty, col].apply(normalize_access_code).nunique()),
+                })
+        if code_debug:
+            st.write("Cobertura del campo de código en la exportación:")
+            st.dataframe(pd.DataFrame(code_debug), use_container_width=True, hide_index=True)
 
     repeat_sheets = repeat_sheets or {}
     st.write(f"Hojas repeat detectadas: {list(repeat_sheets.keys()) if repeat_sheets else 'Ninguna'}")
