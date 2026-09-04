@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v19.0 mapa interactivo por localidad y codigo KOBO"
+APP_VERSION = "v19.1 acceso KOBO robusto y mapa por localidad"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -732,81 +732,111 @@ def detect_company_column(df: pd.DataFrame) -> str | None:
 
 
 def detect_access_code_column(df: pd.DataFrame) -> str | None:
-    """Devuelve exclusivamente el campo de código definido por la encuesta.
+    """Devuelve la primera columna válida de código de acceso de la encuesta.
 
-    El acceso empresarial debe validarse con la pregunta:
-    ``Cree_un_C_digo_de_ac_e_proceso_de_llenado``.
-    Nunca se utiliza ``_id``, UUID, ``instanceID`` ni otros identificadores
-    internos de KOBO como código de consulta.
+    Se prioriza el campo actual del XLSForm, pero se mantienen alias históricos
+    para que las respuestas creadas con versiones anteriores del formulario
+    sigan pudiendo consultarse. Nunca se consideran _id, UUID, instanceID ni
+    otros identificadores técnicos de KOBO como credencial.
     """
     columns = detect_access_code_columns(df)
     return columns[0] if columns else None
 
 
 def detect_access_code_columns(df: pd.DataFrame) -> list[str]:
-    """Detecta el código de acceso creado por la organización.
+    """Detecta exclusivamente columnas plausibles del código creado por la empresa.
 
-    Se prioriza el ``name`` exacto del XLSForm actualizado y se admite la
-    etiqueta completa de la pregunta como respaldo para exportaciones que
-    utilicen labels en lugar de nombres internos.
+    KOBO puede exportar nombres XML, rutas de grupos o labels. Además, cuando el
+    formulario cambia de versión, una respuesta antigua puede conservar el valor
+    bajo un nombre histórico. Por eso se detecta el campo actual y alias semánticos
+    inequívocos, excluyendo expresamente identificadores internos.
     """
     if df.empty:
         return []
 
     ordered: list[str] = []
 
+    technical_ids = {
+        "id", "_id", "uuid", "_uuid", "instanceid", "instance_id",
+        "meta/instanceid", "meta_instanceid", "index", "_index",
+        "submission_id", "formhub/uuid", "xform_id_string",
+    }
+    technical_norm = {norm_id(x) for x in technical_ids}
+
+    def is_technical(col: str) -> bool:
+        cid = norm_id(col)
+        if cid in technical_norm:
+            return True
+        # Evita identificadores técnicos aunque vengan con prefijos de grupos.
+        return any(cid.endswith(x) for x in ["instanceid", "submissionid", "formhubuuid"])
+
     def add(col: str | None) -> None:
-        if col and col in df.columns and col not in ordered:
+        if col and col in df.columns and not is_technical(col) and col not in ordered:
             ordered.append(col)
 
-    # Campo interno exacto confirmado en el XLSForm.
-    exact_fields = [
+    # 1) Campo vigente confirmado en el XLSForm.
+    current_names = [
         "Cree_un_C_digo_de_ac_e_proceso_de_llenado",
         "cree_un_c_digo_de_ac_e_proceso_de_llenado",
     ]
-    for field_name in exact_fields:
+    for field_name in current_names:
         add(find_field_column(df, field_name))
 
-    # Respaldo por etiqueta completa / fragmentos inequívocos.
-    exact_question = norm_text(
-        "Cree un código de acceso para poder ingresar posteriormente. "
-        "Debe contener al menos un número, una letra mayúscula y un signo. "
-        "Conserve este código al finalizar el proceso de llenado."
-    )
-    strong_terms = [
-        "cree un codigo de acceso para poder ingresar posteriormente",
-        "cree un código de acceso para poder ingresar posteriormente",
-        "conserve este codigo al finalizar el proceso de llenado",
-        "conserve este código al finalizar el proceso de llenado",
-        "cree_un_c_digo_de_ac_e_proceso_de_llenado",
+    # 2) Alias históricos razonables que pudieron existir en versiones previas.
+    historical_names = [
+        "codigo_acceso",
+        "codigo_de_acceso",
+        "codigo_ingreso",
+        "codigo_consulta",
+        "clave_acceso",
+        "access_code",
+        "Cree_un_codigo_de_acceso",
+        "Cree_un_C_digo_de_acceso",
     ]
-    strong_terms_norm = [norm_text(x) for x in strong_terms]
+    for field_name in historical_names:
+        add(find_field_column(df, field_name))
+
+    # 3) Columnas exportadas usando label completo o rutas de grupo.
+    strong_phrases = [
+        "cree un codigo de acceso",
+        "cree un código de acceso",
+        "codigo de acceso para poder ingresar",
+        "código de acceso para poder ingresar",
+        "ingresar posteriormente",
+        "conserve este codigo al finalizar",
+        "conserve este código al finalizar",
+        "codigo acceso",
+        "código acceso",
+        "clave de acceso",
+    ]
+    strong_norm = [norm_text(x) for x in strong_phrases]
 
     for col in df.columns:
+        if is_technical(str(col)):
+            continue
         col_norm = norm_text(col)
         col_id = norm_id(col)
 
-        if exact_question and exact_question in col_norm:
-            add(col)
+        if any(term and term in col_norm for term in strong_norm):
+            add(str(col))
             continue
 
-        if any(term and term in col_norm for term in strong_terms_norm):
-            add(col)
-            continue
+        # Nombres XML truncados o sanitizados por distintas versiones de KOBO.
+        if (
+            ("codigo" in col_id or "cdigo" in col_id)
+            and ("acceso" in col_id or "ac_e" in str(col).lower() or "ingresar" in col_id)
+        ):
+            add(str(col))
 
-        if "creeuncdigodeaceprocesodellenado" in col_id:
-            add(col)
-
-    # NO agregar _id, uuid, instanceid ni identificadores técnicos.
     return ordered
 
 
-def normalize_access_code(value: Any) -> str:
-    """Normaliza el código sin destruir letras, números ni signos.
+def normalize_access_code(value: Any, *, casefold: bool = False) -> str:
+    """Normaliza la credencial sin confundirla con identificadores de KOBO.
 
-    Se eliminan únicamente espacios accidentales y caracteres invisibles.
-    La comparación conserva mayúsculas/minúsculas, porque el código funciona
-    como credencial y la propia encuesta exige al menos una letra mayúscula.
+    Corrige espacios invisibles y representaciones numéricas de Excel. Por
+    defecto preserva mayúsculas/minúsculas; el modo ``casefold=True`` se usa
+    únicamente como respaldo de compatibilidad para respuestas históricas.
     """
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return ""
@@ -824,9 +854,10 @@ def normalize_access_code(value: Any) -> str:
         .strip("'")
         .strip()
     )
+    # Elimina espacios accidentales incluso si se pegaron en medio del código.
     text = re.sub(r"\s+", "", text)
 
-    # Respaldo para conversiones de Excel en valores puramente numéricos.
+    # Excel/KOBO puede serializar códigos numéricos como 793682208.0 o notación E.
     numeric_like = text.replace(",", ".")
     if re.fullmatch(r"\d+\.0+", numeric_like):
         numeric_like = numeric_like.split(".", 1)[0]
@@ -836,30 +867,54 @@ def normalize_access_code(value: Any) -> str:
         except Exception:
             pass
 
-    return numeric_like
+    return numeric_like.casefold() if casefold else numeric_like
+
+
+def _code_mask(series: pd.Series, typed_code: str) -> pd.Series:
+    """Comparación exacta primero y tolerante a mayúsculas como respaldo."""
+    typed_exact = normalize_access_code(typed_code)
+    if not typed_exact:
+        return pd.Series(False, index=series.index)
+
+    exact = series.apply(normalize_access_code) == typed_exact
+    if exact.any():
+        return exact
+
+    typed_folded = normalize_access_code(typed_code, casefold=True)
+    folded = series.apply(lambda v: normalize_access_code(v, casefold=True))
+    return folded == typed_folded
 
 
 def find_valid_records_by_code(
-    company_records: pd.DataFrame,
+    records: pd.DataFrame,
     code_columns: list[str],
     typed_code: str,
 ) -> tuple[pd.DataFrame, str | None]:
-    """Busca el código únicamente en el campo de acceso de la encuesta."""
-    typed_norm = normalize_access_code(typed_code)
-    if not typed_norm:
-        return company_records.iloc[0:0], None
+    """Busca el código en cualquiera de las columnas válidas de acceso."""
+    if not normalize_access_code(typed_code):
+        return records.iloc[0:0], None
 
     for col in code_columns:
-        if col not in company_records.columns:
+        if col not in records.columns:
             continue
-
-        normalized_series = company_records[col].apply(normalize_access_code)
-        mask = normalized_series == typed_norm
+        mask = _code_mask(records[col], typed_code)
         if mask.any():
-            return company_records.loc[mask].copy(), col
+            return records.loc[mask].copy(), col
 
-    return company_records.iloc[0:0], None
+    return records.iloc[0:0], None
 
+
+def find_global_records_by_code(
+    df: pd.DataFrame,
+    code_columns: list[str],
+    typed_code: str,
+) -> tuple[pd.DataFrame, str | None]:
+    """Respaldo: localiza la credencial en toda la exportación.
+
+    Esto resuelve respuestas históricas en las que el nombre de la empresa cambió
+    levemente entre versiones, sin usar nunca _id/UUID como contraseña.
+    """
+    return find_valid_records_by_code(df, code_columns, typed_code)
 
 def normalize_company(value: Any) -> str:
     text = unicodedata.normalize("NFKC", str(value or "")).replace("\xa0", " ").strip()
@@ -1112,7 +1167,10 @@ def render_company_view(df: pd.DataFrame, company_col: str | None, code_col: str
 
     code_columns = detect_access_code_columns(df)
     if not code_columns:
-        st.error("No se detectó el campo de acceso 'Cree_un_C_digo_de_ac_e_proceso_de_llenado' en la exportación de KOBO.")
+        st.error(
+            "No se detectó una columna válida para el código de acceso creado en la encuesta. "
+            "La aplicación no utiliza _id, UUID ni instanceID como contraseña."
+        )
         return
 
     visible_by_norm: dict[str, str] = {}
@@ -1135,36 +1193,106 @@ def render_company_view(df: pd.DataFrame, company_col: str | None, code_col: str
     company_records = df[df[company_col].apply(normalize_company) == selected_norm].copy()
 
     if not typed_code:
-        st.info("Seleccione la empresa y escriba el código de acceso creado al final de la encuesta.")
+        st.info("Seleccione la empresa y escriba el código de acceso creado al inicio de la encuesta.")
         with st.expander("Ayuda rápida"):
-            st.write("La app valida exclusivamente el código creado en la pregunta de acceso de la encuesta. Se eliminan espacios accidentales, pero se respetan mayúsculas, minúsculas y signos.")
+            st.write(
+                "Se valida el código registrado en la pregunta 'Cree un código de acceso para poder ingresar posteriormente'. "
+                "Se corrigen espacios accidentales y formatos numéricos de Excel."
+            )
             st.write(f"Columna de empresa detectada: {company_col}")
             st.write(f"Columnas de código detectadas: {', '.join(code_columns)}")
         return
 
-    valid_records, matched_code_col = find_valid_records_by_code(company_records, code_columns, typed_code)
+    # 1) Intento normal: empresa seleccionada + código.
+    valid_records, matched_code_col = find_valid_records_by_code(
+        company_records, code_columns, typed_code
+    )
+    resolved_company = selected_company
+
+    # 2) Respaldo robusto: el código es la credencial primaria. Si la respuesta
+    # histórica quedó asociada a una variante del nombre empresarial, buscamos
+    # el código globalmente y resolvemos la empresa real de ese registro.
+    if valid_records.empty:
+        global_matches, global_code_col = find_global_records_by_code(
+            df, code_columns, typed_code
+        )
+
+        if not global_matches.empty:
+            match_company_values = [
+                str(v).strip()
+                for v in global_matches[company_col].dropna().astype(str).tolist()
+                if str(v).strip()
+            ]
+            match_company_norms = {
+                normalize_company(v) for v in match_company_values if normalize_company(v)
+            }
+
+            if len(match_company_norms) == 1:
+                valid_records = global_matches.copy()
+                matched_code_col = global_code_col
+                resolved_company = match_company_values[-1] if match_company_values else selected_company
+                if normalize_company(resolved_company) != selected_norm:
+                    st.info(
+                        "El código fue validado correctamente. La respuesta está registrada en KOBO "
+                        f"con el nombre de empresa: **{resolved_company}**."
+                    )
+            elif selected_norm in match_company_norms:
+                valid_records = global_matches[
+                    global_matches[company_col].apply(normalize_company) == selected_norm
+                ].copy()
+                matched_code_col = global_code_col
+            else:
+                st.error(
+                    "Ese código aparece asociado a más de una empresa. Seleccione exactamente la empresa correspondiente."
+                )
+                return
 
     if valid_records.empty:
-        st.error("No se encontró una encuesta con esa combinación de empresa y código. Verifique que la app ya haya actualizado los datos desde KOBO.")
+        st.error(
+            "El código ingresado no coincide con el código de acceso almacenado en KOBO para esta respuesta. "
+            "Presione 'Actualizar datos desde KOBO' si el envío fue creado o editado recientemente."
+        )
         with st.expander("Ayuda rápida"):
             st.write(f"Columna usada como empresa: {company_col}")
             st.write(f"Columnas revisadas como código: {', '.join(code_columns)}")
-            st.write("El código se compara contra el campo de acceso de la encuesta: sin espacios accidentales y respetando mayúsculas, minúsculas y signos.")
-            st.write("Si acabas de enviar la encuesta, presiona 'Actualizar datos desde KOBO'.")
-            admin_pw = st.text_input("Clave de administrador para ver códigos disponibles de esta empresa", type="password", key="admin_code_debug")
+            st.write(
+                "La app revisa el campo actual y alias históricos del código de acceso, corrige espacios invisibles "
+                "y conversiones numéricas de Excel, pero nunca usa _id/UUID como contraseña."
+            )
+            admin_pw = st.text_input(
+                "Clave de administrador para revisar el valor exportado para esta empresa",
+                type="password",
+                key="admin_code_debug",
+            )
             if admin_pw == get_secret("ADMIN_PASSWORD", "TurismoVioleta2026"):
                 debug_rows = []
                 for col in code_columns:
-                    if col in company_records.columns:
-                        for raw in company_records[col].dropna().astype(str).unique():
-                            debug_rows.append({"columna": col, "valor exportado": raw, "valor normalizado": normalize_access_code(raw)})
-                st.dataframe(pd.DataFrame(debug_rows), use_container_width=True, hide_index=True)
+                    if col not in company_records.columns:
+                        continue
+                    for raw in company_records[col].dropna().astype(str).unique():
+                        normalized = normalize_access_code(raw)
+                        # El diagnóstico administrativo muestra el valor real para comprobar
+                        # el export de KOBO; esta información no aparece para usuarios públicos.
+                        debug_rows.append(
+                            {
+                                "columna": col,
+                                "valor exportado": raw,
+                                "valor normalizado": normalized,
+                            }
+                        )
+                if debug_rows:
+                    st.dataframe(pd.DataFrame(debug_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.warning(
+                        "Para esta empresa las columnas de código detectadas están vacías. "
+                        "Esto suele indicar que la respuesta pertenece a una versión anterior del formulario "
+                        "o que la exportación configurada en KOBO no incluye ese campo."
+                    )
         return
 
-    st.success(f"Acceso validado con la columna: {matched_code_col}")
+    st.success("Código validado. Mostrando los resultados de la empresa.")
     row = latest_row(valid_records)
-    render_result(row, df, selected_company)
-
+    render_result(row, df, resolved_company)
 
 def render_indicator_table(row: pd.Series, df: pd.DataFrame, indicator_ids: list[int]) -> None:
     """Render indicators as responsive cards instead of a dataframe.
