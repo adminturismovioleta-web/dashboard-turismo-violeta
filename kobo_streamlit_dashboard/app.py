@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v18.8 mapa nativo Streamlit estable"
+APP_VERSION = "v18.9 mapa territorial preciso y autoajustable"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -1672,6 +1672,197 @@ def province_counts_from_repeat_sheets(
     return counts, used_sheets
 
 
+
+def detect_repeat_geopoint_column(df: pd.DataFrame) -> str | None:
+    """Detecta el GPS específico de cada localidad del repeat ``localidades_operacion``."""
+    if df.empty:
+        return None
+
+    for field_name in [
+        "geopunto_localidad_operacion",
+        "geopoint_localidad_operacion",
+        "georreferenciacion_localidad_operacion",
+        "georreferenciación_localidad_operacion",
+    ]:
+        found = find_field_column(df, field_name)
+        if found:
+            return found
+
+    candidates: list[tuple[int, int, str]] = []
+    for col in df.columns:
+        col_norm = norm_text(col)
+        col_id = norm_id(col)
+        if not (
+            "geopunto" in col_id
+            or "geopoint" in col_id
+            or "georreferenci" in col_norm
+            or "gps" in col_norm
+        ):
+            continue
+
+        locality_bonus = 0
+        if "localidad" in col_norm or "localidadoperacion" in col_id:
+            locality_bonus += 4
+        if "1541" in col_id:
+            locality_bonus += 2
+
+        valid_coords = 0
+        for value in df[col].dropna().head(120):
+            lat, lon = parse_ecuador_coordinates(value)
+            if lat is not None and lon is not None:
+                valid_coords += 1
+        candidates.append((valid_coords, locality_bonus, col))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    best = candidates[0]
+    return best[2] if best[0] > 0 or best[1] > 0 else None
+
+
+def _location_text(value: Any) -> str:
+    """Limpia valores territoriales sin inventar etiquetas que no estén en KOBO."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return ""
+    text = str(value).strip()
+    if not text or norm_text(text) in {"nan", "none", "null"}:
+        return ""
+    if "_" in text and not re.fullmatch(r"\d+", text):
+        text = re.sub(r"_+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def georeferenced_localities_from_repeat_sheets(
+    repeat_sheets: dict[str, pd.DataFrame],
+    public_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Extrae localidades operativas georreferenciadas de los repeats de KOBO.
+
+    La versión actualizada del XLSForm incorpora ``geopunto_localidad_operacion``
+    (pregunta 15.4.1). Esos puntos se priorizan en el mapa por encima del centroide
+    provincial y conservan provincia, cantón, parroquia, ciudad/localidad y actividad.
+    """
+    columns = [
+        "lat", "lon", "Provincia", "Canton", "Parroquia", "Localidad",
+        "Actividad", "Referencia", "__parent", "__sheet",
+    ]
+    if not repeat_sheets:
+        return pd.DataFrame(columns=columns), []
+
+    rows: list[dict[str, Any]] = []
+    used_sheets: list[str] = []
+
+    for sheet_name, sheet_df in repeat_sheets.items():
+        if sheet_df.empty:
+            continue
+
+        geopoint_col = detect_repeat_geopoint_column(sheet_df)
+        if not geopoint_col:
+            continue
+
+        province_col = detect_repeat_province_column(sheet_df)
+        canton_col = find_field_column(sheet_df, "canton_operacion")
+        parish_col = find_field_column(sheet_df, "parroquia_operacion")
+        city_col = find_field_column(sheet_df, "ciudad_localidad_operacion")
+        activity_col = find_field_column(sheet_df, "actividad_localidad")
+        if not any([province_col, canton_col, parish_col, city_col]):
+            continue
+
+        filtered, parent_col = filter_repeat_to_public_records(sheet_df, public_df)
+        added_here = 0
+
+        for _, row in filtered.iterrows():
+            lat, lon = parse_ecuador_coordinates(row.get(geopoint_col))
+            if lat is None or lon is None:
+                continue
+            if not (-5.5 <= lat <= 2.2 and -92.5 <= lon <= -74.0):
+                continue
+
+            province_raw = row.get(province_col) if province_col else None
+            province_key = normalize_province_name(province_raw)
+            province = PROVINCE_DISPLAY.get(province_key, _location_text(province_raw))
+            canton = _location_text(row.get(canton_col)) if canton_col else ""
+            parish = _location_text(row.get(parish_col)) if parish_col else ""
+            city = _location_text(row.get(city_col)) if city_col else ""
+            activity = _location_text(row.get(activity_col)) if activity_col else ""
+
+            reference_parts: list[str] = []
+            for value in [city, parish, canton, province]:
+                if value and value not in reference_parts:
+                    reference_parts.append(value)
+            reference = " · ".join(reference_parts) or "Localidad georreferenciada"
+
+            parent_value = ""
+            if parent_col and parent_col in filtered.columns:
+                parent_value = _location_text(row.get(parent_col))
+
+            rows.append({
+                "lat": float(lat),
+                "lon": float(lon),
+                "Provincia": province,
+                "Canton": canton,
+                "Parroquia": parish,
+                "Localidad": city,
+                "Actividad": activity,
+                "Referencia": reference,
+                "__parent": parent_value,
+                "__sheet": str(sheet_name),
+            })
+            added_here += 1
+
+        if added_here:
+            used_sheets.append(str(sheet_name))
+
+    if not rows:
+        return pd.DataFrame(columns=columns), []
+
+    result = pd.DataFrame(rows)
+    if "__parent" in result.columns and (result["__parent"].astype(str).str.strip() != "").any():
+        result = result.drop_duplicates(
+            subset=["__parent", "lat", "lon", "Referencia"], keep="last"
+        )
+    else:
+        result = result.drop_duplicates(subset=["lat", "lon", "Referencia"], keep="last")
+
+    return result.reset_index(drop=True), sorted(set(used_sheets))
+
+
+def _map_zoom_from_points(*frames: pd.DataFrame) -> int:
+    """Calcula un zoom estable según la dispersión de las coordenadas reales."""
+    coords: list[tuple[float, float]] = []
+    for frame in frames:
+        if frame is None or frame.empty or "lat" not in frame.columns or "lon" not in frame.columns:
+            continue
+        for lat, lon in zip(frame["lat"], frame["lon"]):
+            try:
+                lat_f = float(lat)
+                lon_f = float(lon)
+            except Exception:
+                continue
+            if -5.5 <= lat_f <= 2.2 and -92.5 <= lon_f <= -74.0:
+                coords.append((lat_f, lon_f))
+
+    if not coords:
+        return 5
+    if len(coords) == 1:
+        return 9
+
+    lats = [p[0] for p in coords]
+    lons = [p[1] for p in coords]
+    span = max(max(lats) - min(lats), max(lons) - min(lons))
+    if span >= 8:
+        return 4
+    if span >= 4:
+        return 5
+    if span >= 2:
+        return 6
+    if span >= 1:
+        return 7
+    if span >= 0.4:
+        return 8
+    return 9
+
 def detect_geopoint_column(df: pd.DataFrame) -> str | None:
     """Selecciona la columna que realmente contiene coordenadas, no solo una etiqueta con 'GPS'."""
     if df.empty:
@@ -1971,130 +2162,131 @@ def public_georeferenced_points(public_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(points)
 
 
+
 def render_professional_ecuador_map(
     province_df: pd.DataFrame,
-    geo_df: pd.DataFrame,
+    locality_geo_df: pd.DataFrame,
+    company_geo_df: pd.DataFrame,
     height: int = 540,
 ) -> None:
-    """Mapa público simple y estable usando el componente nativo de Streamlit.
+    """Mapa nativo de Streamlit con jerarquía territorial precisa y discreta.
 
-    No usa Leaflet, JavaScript personalizado, iframes propios, Mapbox,
-    Scattermapbox ni proveedores de teselas configurados manualmente. Streamlit
-    gestiona el mapa y su redimensionamiento. Los círculos violetas representan
-    cobertura provincial y los naranjas georreferencias GPS exactas.
+    Violeta sólido = localidad operativa GPS (15.4.1).
+    Naranja = dirección principal GPS (5.1).
+    Violeta translúcido = cobertura provincial contextual.
     """
-
     rows: list[dict[str, Any]] = []
 
-    # Cobertura por provincia: usa el centro provincial ya definido en
-    # ECUADOR_PROVINCES. El tamaño aumenta suavemente según el número de
-    # registros, evitando burbujas excesivamente grandes.
+    # Cobertura provincial contextual. st.map interpreta ``size`` en metros.
+    # Se limita deliberadamente a una escala pequeña y logarítmica.
     if not province_df.empty:
-        valid_counts = pd.to_numeric(province_df.get("Registros"), errors="coerce")
-        max_count = float(valid_counts.max()) if valid_counts.notna().any() else 1.0
-        max_count = max(max_count, 1.0)
-
         for _, item in province_df.iterrows():
             try:
                 lat = float(item.get("lat"))
                 lon = float(item.get("lon"))
-                count = float(item.get("Registros", 0) or 0)
+                count = max(1.0, float(item.get("Registros", 1) or 1))
             except Exception:
                 continue
-
-            if not (-5.5 <= lat <= 2.0 and -92.5 <= lon <= -74.0):
+            if not (-5.5 <= lat <= 2.2 and -92.5 <= lon <= -74.0):
                 continue
 
-            ratio = max(0.0, min(1.0, count / max_count))
-            rows.append(
-                {
-                    "lat": lat,
-                    "lon": lon,
-                    "color": "#6F44C2",
-                    "size": 14000 + (ratio * 22000),
-                    "tipo": "Cobertura provincial",
-                    "detalle": f"{item.get('Provincia', 'Provincia')}: {int(count)} registro(s)",
-                }
-            )
+            # 1 registro ≈ 1,15 km; crecimiento lento; máximo 2,1 km.
+            size_m = min(2100.0, 820.0 + 480.0 * float(np.log1p(count)))
+            rows.append({
+                "lat": lat,
+                "lon": lon,
+                "color": "#6F44C24A",
+                "size": size_m,
+                "tipo": "Cobertura provincial",
+                "detalle": f"{item.get('Provincia', 'Provincia')}: {int(count)} registro(s)",
+            })
 
-    # Puntos GPS exactos. Se muestran más pequeños y en naranja para que no
-    # compitan visualmente con las burbujas provinciales.
-    if not geo_df.empty:
-        for _, item in geo_df.iterrows():
+    # Prioridad 1: geopuntos exactos de cada localidad operativa.
+    if not locality_geo_df.empty:
+        for _, item in locality_geo_df.iterrows():
             try:
                 lat = float(item.get("lat"))
                 lon = float(item.get("lon"))
             except Exception:
                 continue
+            if not (-5.5 <= lat <= 2.2 and -92.5 <= lon <= -74.0):
+                continue
 
-            if not (-5.5 <= lat <= 2.0 and -92.5 <= lon <= -74.0):
+            rows.append({
+                "lat": lat,
+                "lon": lon,
+                "color": "#6F44C2E6",
+                "size": 950.0,
+                "tipo": "Localidad operativa GPS",
+                "detalle": str(item.get("Referencia", "Localidad georreferenciada")),
+            })
+
+    # Prioridad 2: dirección principal de la empresa.
+    if not company_geo_df.empty:
+        for _, item in company_geo_df.iterrows():
+            try:
+                lat = float(item.get("lat"))
+                lon = float(item.get("lon"))
+            except Exception:
+                continue
+            if not (-5.5 <= lat <= 2.2 and -92.5 <= lon <= -74.0):
                 continue
 
             province = str(item.get("Provincia", "") or "").strip()
-            rows.append(
-                {
-                    "lat": lat,
-                    "lon": lon,
-                    "color": "#F47A48",
-                    "size": 6500,
-                    "tipo": "Georreferencia GPS",
-                    "detalle": province or "Punto GPS registrado",
-                }
-            )
+            rows.append({
+                "lat": lat,
+                "lon": lon,
+                "color": "#F47A48E6",
+                "size": 800.0,
+                "tipo": "Dirección principal GPS",
+                "detalle": province or "Dirección principal georreferenciada",
+            })
 
     if not rows:
-        st.info(
-            "No hay coordenadas territoriales válidas para representar en el mapa."
-        )
+        st.info("No hay coordenadas territoriales válidas para representar en el mapa.")
         return
 
     map_df = pd.DataFrame(rows)
 
-    # Leyenda compacta, fuera del mapa, para no depender de controles JS.
     st.markdown(
         """
-        <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;
+        <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap;
                     margin:0 0 8px 2px; color:#5f6472; font-size:0.82rem;">
             <span style="display:flex;align-items:center;gap:7px;">
-                <span style="width:12px;height:12px;border-radius:50%;background:#6F44C2;display:inline-block;"></span>
-                Cobertura por provincia
+                <span style="width:11px;height:11px;border-radius:50%;background:#6F44C2;display:inline-block;"></span>
+                Localidad operativa GPS
             </span>
             <span style="display:flex;align-items:center;gap:7px;">
                 <span style="width:10px;height:10px;border-radius:50%;background:#F47A48;display:inline-block;"></span>
-                Georreferencia GPS
+                Dirección principal GPS
+            </span>
+            <span style="display:flex;align-items:center;gap:7px;">
+                <span style="width:10px;height:10px;border-radius:50%;background:#6F44C24A;display:inline-block;border:1px solid #6F44C2;"></span>
+                Cobertura provincial (referencia)
             </span>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # st.map es el mapa nativo de Streamlit: maneja automáticamente el ancho,
-    # el montaje del componente y el redimensionamiento. Esto elimina la causa
-    # de los mapas incompletos observados con Leaflet embebido manualmente.
+    # El zoom se adapta a la dispersión de los puntos exactos. Si solo existe una
+    # localidad se acerca; si hay varias provincias o Galápagos se abre la vista.
+    exact_for_zoom = locality_geo_df if not locality_geo_df.empty else company_geo_df
+    zoom = _map_zoom_from_points(exact_for_zoom, company_geo_df, province_df)
+
     common_kwargs = dict(
         data=map_df,
         latitude="lat",
         longitude="lon",
         color="color",
         size="size",
-        zoom=5,
+        zoom=zoom,
     )
 
     try:
-        # Firma actual de Streamlit.
-        st.map(
-            **common_kwargs,
-            width="stretch",
-            height=height,
-        )
+        st.map(**common_kwargs, width="stretch", height=height)
     except TypeError:
-        # Respaldo para versiones de Streamlit que aún usan
-        # use_container_width en lugar de width="stretch".
-        st.map(
-            **common_kwargs,
-            use_container_width=True,
-        )
-
+        st.map(**common_kwargs, use_container_width=True)
 
 def public_weps_figure(principle_scores: dict[int, float | None]) -> go.Figure:
     labels = []
@@ -2188,7 +2380,10 @@ def render_public_summary(
         province_col = detect_province_column(public_df)
         province_df = public_province_counts(public_df, province_col)
 
-    # Los puntos exactos se toman de la georreferenciación 5.1 de la tabla principal.
+    # Puntos exactos de localidades operativas (15.4.1) y dirección principal (5.1).
+    locality_geo_df, locality_repeat_sheets = georeferenced_localities_from_repeat_sheets(
+        repeat_sheets, public_df
+    )
     geo_df = public_georeferenced_points(public_df)
 
     companies = (
@@ -2290,6 +2485,10 @@ def render_public_summary(
         findings = []
         if provinces:
             findings.append(f"Cobertura territorial registrada en {provinces} provincias del Ecuador.")
+        if not locality_geo_df.empty:
+            findings.append(
+                f"{len(locality_geo_df)} localidades operativas cuentan con georreferenciación GPS específica."
+            )
         findings.append(f"{companies} empresas forman parte de la medición agregada.")
         if total_score is not None:
             findings.append(
@@ -2322,7 +2521,7 @@ def render_public_summary(
         """
         <div class="tv-card-title">Cobertura territorial y georreferenciación</div>
         <div class="tv-section-caption">
-            Provincias declaradas en las localidades de operación y puntos GPS registrados en KOBO.
+            Localidades operativas georreferenciadas por provincia, cantón, parroquia y ciudad/localidad, con la dirección principal como referencia complementaria.
         </div>
         """,
         unsafe_allow_html=True,
@@ -2331,9 +2530,10 @@ def render_public_summary(
     map_col, rank_col = st.columns([3.4, 1])
 
     with map_col:
-        if not province_df.empty or not geo_df.empty:
+        if not province_df.empty or not locality_geo_df.empty or not geo_df.empty:
             render_professional_ecuador_map(
                 province_df,
+                locality_geo_df,
                 geo_df,
                 height=540,
             )
@@ -2371,19 +2571,36 @@ def render_public_summary(
 
         if province_source == "repeat" and province_repeat_sheets:
             st.markdown(
-                f"""
-                <div style="margin-top:15px; color:#767b8c; font-size:0.82rem;">
-                    Cobertura obtenida de localidades de operación registradas en KOBO.
+                """
+                <div style="margin-top:14px; color:#767b8c; font-size:0.82rem;">
+                    La cobertura provincial se conserva como referencia contextual; los puntos GPS de localidad tienen prioridad cartográfica.
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
+        if not locality_geo_df.empty:
+            st.markdown(
+                f"""
+                <div style="margin-top:12px; color:#21194d; font-size:0.88rem; font-weight:700;">
+                    Localidades georreferenciadas ({len(locality_geo_df)})
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            refs = locality_geo_df["Referencia"].dropna().astype(str).str.strip()
+            refs = [ref for ref in refs if ref][:5]
+            for ref in refs:
+                st.markdown(
+                    f"<div style='padding:5px 0; color:#626779; font-size:0.79rem; line-height:1.35;'>📍 {ref}</div>",
+                    unsafe_allow_html=True,
+                )
+
         if not geo_df.empty:
             st.markdown(
                 f"""
                 <div style="margin-top:10px; color:#767b8c; font-size:0.82rem;">
-                    📍 {len(geo_df)} empresas cuentan con coordenadas geográficas válidas.
+                    🟠 {len(geo_df)} direcciones principales cuentan con GPS válido.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -2466,6 +2683,7 @@ def render_diagnostics(
                     "filas": len(sheet_df),
                     "columnas": len(sheet_df.columns),
                     "provincia detectada": detect_repeat_province_column(sheet_df),
+                    "GPS localidad detectado": detect_repeat_geopoint_column(sheet_df),
                 }
             )
         st.write("Diagnóstico de hojas repeat:")
