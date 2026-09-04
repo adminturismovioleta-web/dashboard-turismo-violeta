@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v18.7 Leaflet estable navegación condicional"
+APP_VERSION = "v18.8 mapa nativo Streamlit estable"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -1976,39 +1976,49 @@ def render_professional_ecuador_map(
     geo_df: pd.DataFrame,
     height: int = 540,
 ) -> None:
-    """Renderiza un mapa Leaflet profesional centrado en Ecuador.
+    """Mapa público simple y estable usando el componente nativo de Streamlit.
 
-    El mapa se ejecuta dentro de un componente HTML aislado y no depende de
-    ``Scattermapbox``/``Scattermap`` de Plotly. Usa Esri World Topographic
-    como mapa base profesional, Esri World Street Map y OpenStreetMap como
-    alternativas, marcadores agregados por provincia y clustering de puntos
-    GPS exactos. No requiere token de Mapbox ni API key de CARTO.
+    No usa Leaflet, JavaScript personalizado, iframes propios, Mapbox,
+    Scattermapbox ni proveedores de teselas configurados manualmente. Streamlit
+    gestiona el mapa y su redimensionamiento. Los círculos violetas representan
+    cobertura provincial y los naranjas georreferencias GPS exactas.
     """
 
-    province_points: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+
+    # Cobertura por provincia: usa el centro provincial ya definido en
+    # ECUADOR_PROVINCES. El tamaño aumenta suavemente según el número de
+    # registros, evitando burbujas excesivamente grandes.
     if not province_df.empty:
-        max_count = max(float(province_df["Registros"].max()), 1.0)
+        valid_counts = pd.to_numeric(province_df.get("Registros"), errors="coerce")
+        max_count = float(valid_counts.max()) if valid_counts.notna().any() else 1.0
+        max_count = max(max_count, 1.0)
+
         for _, item in province_df.iterrows():
             try:
-                count = int(float(item.get("Registros", 0)))
                 lat = float(item.get("lat"))
                 lon = float(item.get("lon"))
+                count = float(item.get("Registros", 0) or 0)
             except Exception:
                 continue
 
-            # Escala visual compacta: 38–62 px según presencia relativa.
-            size = 38 + int((count / max_count) * 24)
-            province_points.append(
+            if not (-5.5 <= lat <= 2.0 and -92.5 <= lon <= -74.0):
+                continue
+
+            ratio = max(0.0, min(1.0, count / max_count))
+            rows.append(
                 {
-                    "name": str(item.get("Provincia", "Provincia")),
-                    "count": count,
                     "lat": lat,
                     "lon": lon,
-                    "size": size,
+                    "color": "#6F44C2",
+                    "size": 14000 + (ratio * 22000),
+                    "tipo": "Cobertura provincial",
+                    "detalle": f"{item.get('Provincia', 'Provincia')}: {int(count)} registro(s)",
                 }
             )
 
-    gps_points: list[dict[str, Any]] = []
+    # Puntos GPS exactos. Se muestran más pequeños y en naranja para que no
+    # compitan visualmente con las burbujas provinciales.
     if not geo_df.empty:
         for _, item in geo_df.iterrows():
             try:
@@ -2017,535 +2027,73 @@ def render_professional_ecuador_map(
             except Exception:
                 continue
 
+            if not (-5.5 <= lat <= 2.0 and -92.5 <= lon <= -74.0):
+                continue
+
             province = str(item.get("Provincia", "") or "").strip()
-            gps_points.append(
+            rows.append(
                 {
                     "lat": lat,
                     "lon": lon,
-                    "province": province,
+                    "color": "#F47A48",
+                    "size": 6500,
+                    "tipo": "Georreferencia GPS",
+                    "detalle": province or "Punto GPS registrado",
                 }
             )
 
-    province_json = json.dumps(province_points, ensure_ascii=False)
-    gps_json = json.dumps(gps_points, ensure_ascii=False)
+    if not rows:
+        st.info(
+            "No hay coordenadas territoriales válidas para representar en el mapa."
+        )
+        return
 
-    html = f"""
-    <!DOCTYPE html>
-    <html lang="es">
-    <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    map_df = pd.DataFrame(rows)
 
-        <link
-            rel="stylesheet"
-            href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-            integrity="sha256-p4NxAoJBhIINfQ3ynhHdMcVS5tKXYxFt2Z6V8K2Cw7Y="
-            crossorigin=""
-        />
-        <link
-            rel="stylesheet"
-            href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"
-        />
-        <link
-            rel="stylesheet"
-            href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"
-        />
-
-        <style>
-            html, body {{
-                width: 100%;
-                height: 100%;
-                margin: 0;
-                padding: 0;
-                background: transparent;
-                font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            }}
-
-            #map-wrap {{
-                position: relative;
-                width: 100%;
-                height: {height - 4}px;
-                border: 1px solid #e7e4f0;
-                border-radius: 18px;
-                overflow: hidden;
-                box-shadow: 0 4px 18px rgba(31, 24, 67, 0.07);
-                background: #eef5f8;
-            }}
-
-            #ecuador-map {{
-                width: 100%;
-                height: 100%;
-            }}
-
-            .leaflet-control-zoom a {{
-                color: #2c2454 !important;
-                border: none !important;
-            }}
-
-            .leaflet-control-zoom {{
-                border: none !important;
-                box-shadow: 0 3px 14px rgba(20, 20, 40, 0.16) !important;
-                border-radius: 10px !important;
-                overflow: hidden;
-            }}
-
-            .leaflet-control-attribution {{
-                font-size: 9px !important;
-                background: rgba(255,255,255,0.86) !important;
-            }}
-
-            .province-div-icon,
-            .gps-div-icon {{
-                background: transparent;
-                border: none;
-            }}
-
-            .province-bubble {{
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                border-radius: 999px;
-                background: linear-gradient(145deg, #7c4dce, #5d35b2);
-                border: 3px solid rgba(255,255,255,0.96);
-                box-shadow: 0 5px 18px rgba(80, 43, 157, 0.34);
-                color: #ffffff;
-                font-weight: 800;
-                font-size: 14px;
-                line-height: 1;
-                user-select: none;
-            }}
-
-            .gps-pin {{
-                position: relative;
-                width: 30px;
-                height: 38px;
-                transform: translate(-1px, -2px);
-                filter: drop-shadow(0 4px 5px rgba(0,0,0,0.22));
-            }}
-
-            .gps-pin svg {{
-                width: 30px;
-                height: 38px;
-                display: block;
-            }}
-
-            .leaflet-tooltip.tv-tooltip {{
-                border: 0;
-                border-radius: 9px;
-                box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-                padding: 8px 10px;
-                color: #29233f;
-                font-size: 12px;
-                font-weight: 600;
-            }}
-
-            .map-legend {{
-                background: rgba(255,255,255,0.94);
-                border: 1px solid rgba(227,223,239,0.95);
-                border-radius: 12px;
-                padding: 9px 12px;
-                box-shadow: 0 3px 14px rgba(20, 20, 40, 0.12);
-                color: #4e4a61;
-                font-size: 11px;
-                line-height: 1.35;
-            }}
-
-            .map-legend-row {{
-                display: flex;
-                align-items: center;
-                gap: 7px;
-                margin: 3px 0;
-                white-space: nowrap;
-            }}
-
-            .legend-province {{
-                width: 13px;
-                height: 13px;
-                border-radius: 50%;
-                background: #6d43c0;
-                border: 2px solid white;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.18);
-            }}
-
-            .legend-gps {{
-                width: 10px;
-                height: 10px;
-                border-radius: 50% 50% 50% 0;
-                background: #f47a48;
-                transform: rotate(-45deg);
-                margin-left: 2px;
-            }}
-
-            .map-title-chip {{
-                background: rgba(255,255,255,0.95);
-                border: 1px solid rgba(227,223,239,0.95);
-                border-radius: 12px;
-                padding: 9px 12px;
-                box-shadow: 0 3px 14px rgba(20, 20, 40, 0.12);
-                color: #252047;
-            }}
-
-            .map-title-chip strong {{
-                display: block;
-                font-size: 12px;
-                margin-bottom: 2px;
-            }}
-
-            .map-title-chip span {{
-                font-size: 10px;
-                color: #777185;
-            }}
-
-            .marker-cluster-small,
-            .marker-cluster-medium,
-            .marker-cluster-large {{
-                background-color: rgba(111, 68, 194, 0.22) !important;
-            }}
-
-            .marker-cluster-small div,
-            .marker-cluster-medium div,
-            .marker-cluster-large div {{
-                background-color: #6f44c2 !important;
-                color: white !important;
-                font-weight: 800 !important;
-            }}
-
-            #galapagos-inset {{
-                display: none;
-                position: absolute;
-                left: 14px;
-                bottom: 62px;
-                width: 205px;
-                height: 138px;
-                z-index: 800;
-                border: 3px solid white;
-                border-radius: 12px;
-                box-shadow: 0 5px 18px rgba(0,0,0,0.23);
-                overflow: hidden;
-                background: #eef5f8;
-            }}
-
-            #galapagos-label {{
-                display: none;
-                position: absolute;
-                left: 22px;
-                bottom: 174px;
-                z-index: 900;
-                background: rgba(255,255,255,0.93);
-                color: #312858;
-                border-radius: 7px;
-                padding: 3px 7px;
-                font-size: 10px;
-                font-weight: 700;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-            }}
-        </style>
-    </head>
-
-    <body>
-        <div id="map-wrap">
-            <div id="ecuador-map"></div>
-            <div id="galapagos-label">Galápagos</div>
-            <div id="galapagos-inset"></div>
+    # Leyenda compacta, fuera del mapa, para no depender de controles JS.
+    st.markdown(
+        """
+        <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;
+                    margin:0 0 8px 2px; color:#5f6472; font-size:0.82rem;">
+            <span style="display:flex;align-items:center;gap:7px;">
+                <span style="width:12px;height:12px;border-radius:50%;background:#6F44C2;display:inline-block;"></span>
+                Cobertura por provincia
+            </span>
+            <span style="display:flex;align-items:center;gap:7px;">
+                <span style="width:10px;height:10px;border-radius:50%;background:#F47A48;display:inline-block;"></span>
+                Georreferencia GPS
+            </span>
         </div>
-
-        <script
-            src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-            crossorigin=""
-        ></script>
-        <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-
-        <script>
-            const provincePoints = {province_json};
-            const gpsPoints = {gps_json};
-
-            const mainlandBounds = L.latLngBounds(
-                [-5.45, -81.35],
-                [1.65, -74.95]
-            );
-
-            const maxBounds = L.latLngBounds(
-                [-7.0, -83.0],
-                [3.0, -73.5]
-            );
-
-            const map = L.map('ecuador-map', {{
-                zoomControl: false,
-                attributionControl: true,
-                preferCanvas: true,
-                maxBounds: maxBounds,
-                maxBoundsViscosity: 0.72,
-                minZoom: 5,
-                maxZoom: 13
-            }});
-
-            // Mapas base profesionales sin CARTO ni Mapbox.
-            // Esri Topographic se utiliza por defecto; si sus teselas fallan,
-            // el mapa cambia automáticamente a OpenStreetMap.
-            const esriTopo = L.tileLayer(
-                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{{z}}/{{y}}/{{x}}',
-                {{
-                    maxZoom: 19,
-                    attribution: 'Tiles &copy; Esri &mdash; Sources: Esri, HERE, Garmin, USGS, NGA, EPA, NPS, INCREMENT P'
-                }}
-            );
-
-            const esriStreet = L.tileLayer(
-                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{{z}}/{{y}}/{{x}}',
-                {{
-                    maxZoom: 19,
-                    attribution: 'Tiles &copy; Esri'
-                }}
-            );
-
-            const osm = L.tileLayer(
-                'https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',
-                {{
-                    maxZoom: 19,
-                    attribution: '&copy; OpenStreetMap contributors'
-                }}
-            );
-
-            let baseLayer = esriTopo;
-            let esriTileErrors = 0;
-            esriTopo.on('tileerror', function() {{
-                esriTileErrors += 1;
-                if (esriTileErrors >= 4 && map.hasLayer(esriTopo)) {{
-                    map.removeLayer(esriTopo);
-                    osm.addTo(map);
-                    baseLayer = osm;
-                }}
-            }});
-
-            esriTopo.addTo(map);
-
-            L.control.zoom({{position: 'topright'}}).addTo(map);
-            L.control.scale({{position: 'bottomright', imperial: false}}).addTo(map);
-            L.control.layers(
-                {{
-                    'Topográfico': esriTopo,
-                    'Calles': esriStreet,
-                    'OpenStreetMap': osm
-                }},
-                null,
-                {{position: 'topright', collapsed: true}}
-            ).addTo(map);
-
-            const titleControl = L.control({{position: 'topleft'}});
-            titleControl.onAdd = function() {{
-                const div = L.DomUtil.create('div', 'map-title-chip');
-                div.innerHTML = '<strong>Ecuador</strong><span>Cobertura territorial y puntos GPS</span>';
-                L.DomEvent.disableClickPropagation(div);
-                return div;
-            }};
-            titleControl.addTo(map);
-
-            const legend = L.control({{position: 'bottomleft'}});
-            legend.onAdd = function() {{
-                const div = L.DomUtil.create('div', 'map-legend');
-                div.innerHTML = `
-                    <div class="map-legend-row">
-                        <span class="legend-province"></span>
-                        <span>Cobertura por provincia</span>
-                    </div>
-                    <div class="map-legend-row">
-                        <span class="legend-gps"></span>
-                        <span>Georreferencia exacta</span>
-                    </div>
-                `;
-                L.DomEvent.disableClickPropagation(div);
-                return div;
-            }};
-            legend.addTo(map);
-
-            // Marcadores agregados de provincia.
-            provincePoints
-                .filter(p => p.lon > -85)
-                .forEach(p => {{
-                    const icon = L.divIcon({{
-                        className: 'province-div-icon',
-                        html: `<div class="province-bubble" style="width:${{p.size}}px;height:${{p.size}}px;">${{p.count}}</div>`,
-                        iconSize: [p.size, p.size],
-                        iconAnchor: [p.size / 2, p.size / 2]
-                    }});
-
-                    L.marker([p.lat, p.lon], {{icon, zIndexOffset: 250}})
-                        .bindTooltip(
-                            `<b>${{p.name}}</b><br>${{p.count}} registro${{p.count === 1 ? '' : 's'}} territorial${{p.count === 1 ? '' : 'es'}}`,
-                            {{className: 'tv-tooltip', direction: 'top', offset: [0, -8]}}
-                        )
-                        .addTo(map);
-                }});
-
-            // Puntos GPS con clustering.
-            const cluster = L.markerClusterGroup({{
-                showCoverageOnHover: false,
-                spiderfyOnMaxZoom: true,
-                removeOutsideVisibleBounds: true,
-                maxClusterRadius: 48,
-                disableClusteringAtZoom: 10
-            }});
-
-            const pinSvg = `
-                <div class="gps-pin">
-                    <svg viewBox="0 0 30 38" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M15 1C7.8 1 2 6.8 2 14c0 9.4 13 23 13 23s13-13.6 13-23C28 6.8 22.2 1 15 1z"
-                              fill="#f47a48" stroke="#ffffff" stroke-width="2"/>
-                        <circle cx="15" cy="14" r="5" fill="#ffffff"/>
-                    </svg>
-                </div>`;
-
-            gpsPoints
-                .filter(p => p.lon > -85)
-                .forEach(p => {{
-                    const icon = L.divIcon({{
-                        className: 'gps-div-icon',
-                        html: pinSvg,
-                        iconSize: [30, 38],
-                        iconAnchor: [15, 36],
-                        popupAnchor: [0, -32]
-                    }});
-
-                    const marker = L.marker([p.lat, p.lon], {{icon}});
-                    marker.bindTooltip(
-                        p.province
-                            ? `<b>Registro georreferenciado</b><br>${{p.province}}`
-                            : '<b>Registro georreferenciado</b>',
-                        {{className: 'tv-tooltip', direction: 'top', offset: [0, -20]}}
-                    );
-                    cluster.addLayer(marker);
-                }});
-
-            map.addLayer(cluster);
-
-            // Inset automático para Galápagos cuando existan registros allí.
-            const galProvincePoints = provincePoints.filter(p => p.lon <= -85);
-            const galGpsPoints = gpsPoints.filter(p => p.lon <= -85);
-
-            if (galProvincePoints.length > 0 || galGpsPoints.length > 0) {{
-                document.getElementById('galapagos-inset').style.display = 'block';
-                document.getElementById('galapagos-label').style.display = 'block';
-
-                const galMap = L.map('galapagos-inset', {{
-                    zoomControl: false,
-                    attributionControl: false,
-                    dragging: true,
-                    scrollWheelZoom: false,
-                    doubleClickZoom: true,
-                    minZoom: 5,
-                    maxZoom: 12
-                }});
-                const galEsri = L.tileLayer(
-                    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{{z}}/{{y}}/{{x}}',
-                    {{
-                        maxZoom: 19,
-                        attribution: 'Tiles &copy; Esri'
-                    }}
-                );
-                const galOsm = L.tileLayer(
-                    'https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',
-                    {{maxZoom: 19}}
-                );
-                let galTileErrors = 0;
-                galEsri.on('tileerror', function() {{
-                    galTileErrors += 1;
-                    if (galTileErrors >= 3 && galMap.hasLayer(galEsri)) {{
-                        galMap.removeLayer(galEsri);
-                        galOsm.addTo(galMap);
-                    }}
-                }});
-                galEsri.addTo(galMap);
-                galMap.setView([-0.75, -90.55], 7);
-
-                galProvincePoints.forEach(p => {{
-                    const insetSize = Math.max(30, Math.min(44, p.size - 8));
-                    const icon = L.divIcon({{
-                        className: 'province-div-icon',
-                        html: `<div class="province-bubble" style="width:${{insetSize}}px;height:${{insetSize}}px;font-size:12px;">${{p.count}}</div>`,
-                        iconSize: [insetSize, insetSize],
-                        iconAnchor: [insetSize / 2, insetSize / 2]
-                    }});
-                    L.marker([p.lat, p.lon], {{icon}})
-                        .bindTooltip(`<b>${{p.name}}</b><br>${{p.count}} registro(s)`, {{className: 'tv-tooltip'}})
-                        .addTo(galMap);
-                }});
-
-                galGpsPoints.forEach(p => {{
-                    const icon = L.divIcon({{
-                        className: 'gps-div-icon',
-                        html: pinSvg,
-                        iconSize: [27, 34],
-                        iconAnchor: [13, 32]
-                    }});
-                    L.marker([p.lat, p.lon], {{icon}}).addTo(galMap);
-                }});
-            }}
-
-            // Evita que el scroll de la página haga zoom accidental en el mapa.
-            map.scrollWheelZoom.disable();
-            map.on('click', function() {{
-                map.scrollWheelZoom.enable();
-            }});
-            map.on('mouseout', function() {{
-                map.scrollWheelZoom.disable();
-            }});
-
-            // --------------------------------------------------------
-            // SINCRONIZACIÓN DEL TAMAÑO CON STREAMLIT
-            // --------------------------------------------------------
-            // Leaflet debe calcular el tamaño solo después de que el iframe
-            // tenga sus dimensiones finales. ResizeObserver mantiene el mapa
-            // sincronizado si cambia el ancho de la página o de la columna.
-            let initialViewApplied = false;
-
-            function refreshMapSize(applyInitialView = false) {{
-                requestAnimationFrame(() => {{
-                    map.invalidateSize({{animate: false, pan: false}});
-
-                    if (applyInitialView && !initialViewApplied) {{
-                        initialViewApplied = true;
-                        map.fitBounds(mainlandBounds, {{
-                            padding: [22, 22],
-                            animate: false
-                        }});
-                    }}
-                }});
-            }}
-
-            const mapWrap = document.getElementById('map-wrap');
-
-            if (window.ResizeObserver && mapWrap) {{
-                const resizeObserver = new ResizeObserver(() => {{
-                    refreshMapSize(false);
-                }});
-                resizeObserver.observe(mapWrap);
-            }}
-
-            window.addEventListener('resize', () => refreshMapSize(false));
-            window.addEventListener('load', () => refreshMapSize(true));
-
-            // Varias pasadas cubren el montaje inicial del componente de Streamlit
-            // y la carga de fuentes/controles sin depender de una pestaña oculta.
-            setTimeout(() => refreshMapSize(true), 80);
-            setTimeout(() => refreshMapSize(true), 300);
-            setTimeout(() => refreshMapSize(false), 900);
-            setTimeout(() => refreshMapSize(false), 1600);
-
-            // Recalcula también cuando las teselas base terminan de cargarse.
-            esriTopo.on('load', () => refreshMapSize(false));
-            esriStreet.on('load', () => refreshMapSize(false));
-            osm.on('load', () => refreshMapSize(false));
-        </script>
-    </body>
-    </html>
-    """
-
-    st.components.v1.html(
-        html,
-        height=height,
-        scrolling=False,
+        """,
+        unsafe_allow_html=True,
     )
+
+    # st.map es el mapa nativo de Streamlit: maneja automáticamente el ancho,
+    # el montaje del componente y el redimensionamiento. Esto elimina la causa
+    # de los mapas incompletos observados con Leaflet embebido manualmente.
+    common_kwargs = dict(
+        data=map_df,
+        latitude="lat",
+        longitude="lon",
+        color="color",
+        size="size",
+        zoom=5,
+    )
+
+    try:
+        # Firma actual de Streamlit.
+        st.map(
+            **common_kwargs,
+            width="stretch",
+            height=height,
+        )
+    except TypeError:
+        # Respaldo para versiones de Streamlit que aún usan
+        # use_container_width en lugar de width="stretch".
+        st.map(
+            **common_kwargs,
+            use_container_width=True,
+        )
 
 
 def public_weps_figure(principle_scores: dict[int, float | None]) -> go.Figure:
