@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-APP_VERSION = "v20.0 exportacion KOBO ultima version CLAVE"
+APP_VERSION = "v21.0 panel administrativo integral y filtros"
 
 st.set_page_config(
     page_title="Dashboard Turismo Violeta",
@@ -5661,73 +5661,745 @@ def render_public_summary(
     )
 
 
+
+def _admin_join_key(value: Any) -> str:
+    """Normaliza llaves de relación entre hoja principal y repeats de KOBO."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    numeric_like = text.replace(",", ".")
+    if re.fullmatch(r"-?\d+\.0+", numeric_like):
+        return numeric_like.split(".", 1)[0]
+    return text
+
+
+def admin_company_score_table(df: pd.DataFrame, company_col: str | None) -> pd.DataFrame:
+    """Construye una fila analítica por empresa con avance general y los 7 WEPs."""
+    columns = ["Empresa", "Avance general", "Nivel"] + [f"WEP {i}" for i in range(1, 8)]
+    if df.empty or not company_col or company_col not in df.columns:
+        return pd.DataFrame(columns=columns)
+
+    latest = latest_public_records(df, company_col)
+    rows: list[dict[str, Any]] = []
+    for _, row in latest.iterrows():
+        company = str(row.get(company_col, "") or "").strip()
+        if not company:
+            continue
+        objective_scores = {oid: objective_score(row, latest, oid) for oid in OBJECTIVES}
+        p_scores = {
+            p["id"]: principle_score(row, latest, p["id"], objective_scores)
+            for p in PRINCIPLES
+        }
+        total = overall_score(p_scores)
+        item: dict[str, Any] = {
+            "Empresa": company,
+            "Avance general": total,
+            "Nivel": level_from_score(total),
+        }
+        for pid in range(1, 8):
+            item[f"WEP {pid}"] = p_scores.get(pid)
+        rows.append(item)
+    return pd.DataFrame(rows, columns=columns)
+
+
+def admin_objective_average_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Promedio de los 13 objetivos en el conjunto filtrado."""
+    rows: list[dict[str, Any]] = []
+    if df.empty:
+        return pd.DataFrame(columns=["Objetivo", "Nombre", "Avance promedio", "Nivel", "Empresas con cálculo"])
+
+    for oid, meta in OBJECTIVES.items():
+        values = []
+        for _, row in df.iterrows():
+            score = objective_score(row, df, oid)
+            if score is not None:
+                values.append(float(score))
+        avg = float(np.mean(values)) if values else None
+        rows.append({
+            "Objetivo": oid,
+            "Nombre": meta["title"],
+            "Avance promedio": avg,
+            "Nivel": level_from_score(avg),
+            "Empresas con cálculo": len(values),
+        })
+    return pd.DataFrame(rows)
+
+
+def admin_indicator_average_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Promedio de los 48 indicadores en el conjunto filtrado."""
+    rows: list[dict[str, Any]] = []
+    if df.empty:
+        return pd.DataFrame(columns=["Indicador", "Nombre", "Avance promedio", "Nivel", "Empresas con cálculo", "Referencia"])
+
+    for iid, meta in INDICATORS.items():
+        values = []
+        for _, row in df.iterrows():
+            score = indicator_score(row, df, iid)
+            if score is not None:
+                values.append(float(score))
+        avg = float(np.mean(values)) if values else None
+        rows.append({
+            "Indicador": iid,
+            "Nombre": meta["title"],
+            "Avance promedio": avg,
+            "Nivel": level_from_score(avg),
+            "Empresas con cálculo": len(values),
+            "Referencia": meta.get("ref", ""),
+        })
+    return pd.DataFrame(rows)
+
+
+def _admin_link_repeat_to_companies(
+    repeat_df: pd.DataFrame,
+    main_df: pd.DataFrame,
+    company_col: str | None,
+) -> pd.DataFrame:
+    """Añade __admin_company a un repeat cuando KOBO exporta una llave padre utilizable."""
+    result = repeat_df.copy()
+    result["__admin_company"] = ""
+    if result.empty or main_df.empty or not company_col or company_col not in main_df.columns:
+        return result
+
+    key_pairs = [
+        (["_parent_index", "parent_index"], ["_index", "index"]),
+        (["parent_key", "_parent_key", "PARENT_KEY"], ["key", "KEY"]),
+        (["_parent_uuid", "parent_uuid"], ["_uuid", "uuid"]),
+        (["_parent_id", "parent_id"], ["_id", "id"]),
+    ]
+
+    for repeat_candidates, main_candidates in key_pairs:
+        repeat_key = _find_id_column(result, repeat_candidates)
+        main_key = _find_id_column(main_df, main_candidates)
+        if not repeat_key or not main_key:
+            continue
+
+        mapping: dict[str, str] = {}
+        for _, row in main_df.iterrows():
+            key = _admin_join_key(row.get(main_key))
+            company = str(row.get(company_col, "") or "").strip()
+            if key and company:
+                mapping[key] = company
+        if not mapping:
+            continue
+
+        linked = result[repeat_key].apply(_admin_join_key).map(mapping).fillna("")
+        if linked.astype(str).str.strip().ne("").any():
+            result["__admin_company"] = linked
+            return result
+
+    return result
+
+
+def admin_company_province_map(
+    repeat_sheets: dict[str, pd.DataFrame],
+    main_df: pd.DataFrame,
+    company_col: str | None,
+) -> dict[str, set[str]]:
+    """Devuelve provincias declaradas por cada empresa usando localidades_operacion/repeats."""
+    mapping: dict[str, set[str]] = {}
+    if main_df.empty or not company_col or company_col not in main_df.columns:
+        return mapping
+
+    for company in main_df[company_col].dropna().astype(str):
+        if company.strip():
+            mapping.setdefault(normalize_company(company), set())
+
+    for _, sheet_df in (repeat_sheets or {}).items():
+        if sheet_df.empty:
+            continue
+        province_col = detect_repeat_province_column(sheet_df)
+        if not province_col:
+            continue
+        linked = _admin_link_repeat_to_companies(sheet_df, main_df, company_col)
+        if "__admin_company" not in linked.columns:
+            continue
+        for _, row in linked.iterrows():
+            company = str(row.get("__admin_company", "") or "").strip()
+            if not company:
+                continue
+            pkey = normalize_province_name(row.get(province_col))
+            province = PROVINCE_DISPLAY.get(pkey, _location_text(row.get(province_col)))
+            if province:
+                mapping.setdefault(normalize_company(company), set()).add(province)
+
+    # Respaldo por provincia en la tabla principal si existiera.
+    province_col = detect_province_column(main_df)
+    if province_col:
+        for _, row in main_df.iterrows():
+            company = str(row.get(company_col, "") or "").strip()
+            if not company:
+                continue
+            pkey = normalize_province_name(row.get(province_col))
+            province = PROVINCE_DISPLAY.get(pkey, _location_text(row.get(province_col)))
+            if province:
+                mapping.setdefault(normalize_company(company), set()).add(province)
+    return mapping
+
+
+def admin_heatmap_figure(score_table: pd.DataFrame) -> go.Figure:
+    """Matriz empresa × WEP para detectar patrones rápidamente."""
+    if score_table.empty:
+        return go.Figure()
+    cols = [f"WEP {i}" for i in range(1, 8)]
+    z = score_table[cols].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
+    text = np.where(np.isnan(z), "—", np.vectorize(lambda x: f"{x:.1f}%")(np.nan_to_num(z)))
+    fig = go.Figure(
+        go.Heatmap(
+            z=z,
+            x=cols,
+            y=score_table["Empresa"].astype(str).tolist(),
+            zmin=0,
+            zmax=100,
+            colorscale=[
+                [0.0, "#dc2626"],
+                [0.25, "#ea580c"],
+                [0.50, "#7c3aed"],
+                [0.75, "#6d28d9"],
+                [1.0, "#16a34a"],
+            ],
+            colorbar=dict(title="Avance %"),
+            text=text,
+            hovertemplate="%{y}<br>%{x}: %{z:.1f}%<extra></extra>",
+            hoverongaps=False,
+        )
+    )
+    fig.update_layout(
+        height=max(330, min(850, 90 + len(score_table) * 34)),
+        margin=dict(l=10, r=10, t=25, b=10),
+        xaxis=dict(side="top", fixedrange=True),
+        yaxis=dict(autorange="reversed", fixedrange=True, automargin=True),
+        dragmode=False,
+    )
+    return fig
+
+
+def admin_objectives_figure(table: pd.DataFrame) -> go.Figure:
+    valid = table.dropna(subset=["Avance promedio"]).copy()
+    if valid.empty:
+        return go.Figure()
+    valid = valid.sort_values("Objetivo", ascending=False)
+    fig = go.Figure(
+        go.Bar(
+            x=valid["Avance promedio"],
+            y=[f"Obj. {int(i)} · {str(n)[:58]}" for i, n in zip(valid["Objetivo"], valid["Nombre"])],
+            orientation="h",
+            marker_color=[color_from_score(v) for v in valid["Avance promedio"]],
+            text=[f"{v:.1f}%" for v in valid["Avance promedio"]],
+            textposition="auto",
+            hovertemplate="%{y}<br>%{x:.1f}%<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        height=520,
+        margin=dict(l=10, r=10, t=15, b=20),
+        xaxis=dict(range=[0, 100], ticksuffix="%", fixedrange=True),
+        yaxis=dict(fixedrange=True, automargin=True),
+        showlegend=False,
+        dragmode=False,
+    )
+    return fig
+
+
+def admin_indicator_gaps_figure(table: pd.DataFrame, top_n: int = 12) -> go.Figure:
+    valid = table.dropna(subset=["Avance promedio"]).copy()
+    if valid.empty:
+        return go.Figure()
+    valid = valid.sort_values("Avance promedio", ascending=True).head(top_n)
+    valid = valid.sort_values("Avance promedio", ascending=False)
+    fig = go.Figure(
+        go.Bar(
+            x=valid["Avance promedio"],
+            y=[f"Ind. {int(i)} · {str(n)[:52]}" for i, n in zip(valid["Indicador"], valid["Nombre"])],
+            orientation="h",
+            marker_color=[color_from_score(v) for v in valid["Avance promedio"]],
+            text=[f"{v:.1f}%" for v in valid["Avance promedio"]],
+            textposition="auto",
+            hovertemplate="%{y}<br>%{x:.1f}%<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        height=470,
+        margin=dict(l=10, r=10, t=15, b=20),
+        xaxis=dict(range=[0, 100], ticksuffix="%", fixedrange=True),
+        yaxis=dict(fixedrange=True, automargin=True),
+        showlegend=False,
+        dragmode=False,
+    )
+    return fig
+
+
+def _admin_nonempty_field_table(row: pd.Series, search: str = "") -> pd.DataFrame:
+    records = []
+    search_norm = norm_text(search)
+    for col, value in row.items():
+        if str(col).startswith("__"):
+            continue
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            continue
+        text = str(value).strip()
+        if not text or norm_text(text) in {"nan", "none", "null"}:
+            continue
+        if search_norm and search_norm not in norm_text(col) and search_norm not in norm_text(text):
+            continue
+        records.append({"Campo": str(col), "Valor": text})
+    return pd.DataFrame(records)
+
+
+def _admin_filter_repeat_for_company(
+    repeat_df: pd.DataFrame,
+    main_df: pd.DataFrame,
+    company_col: str | None,
+    company_name: str,
+) -> pd.DataFrame:
+    linked = _admin_link_repeat_to_companies(repeat_df, main_df, company_col)
+    if "__admin_company" not in linked.columns:
+        return linked.iloc[0:0].copy()
+    wanted = normalize_company(company_name)
+    return linked[linked["__admin_company"].apply(normalize_company) == wanted].copy()
+
+
+def render_admin_dashboard(
+    df: pd.DataFrame,
+    company_col: str | None,
+    code_col: str | None,
+    repeat_sheets: dict[str, pd.DataFrame] | None = None,
+) -> None:
+    """Panel privado: análisis agregado, comparación y detalle sin código por empresa."""
+    repeat_sheets = repeat_sheets or {}
+    if not company_col or company_col not in df.columns:
+        st.error("No se detectó la columna de empresa; no es posible construir el panel administrativo.")
+        return
+
+    latest = latest_public_records(df, company_col)
+    base_scores = admin_company_score_table(latest, company_col)
+    province_map = admin_company_province_map(repeat_sheets, latest, company_col)
+
+    st.markdown("### Filtros administrativos")
+    st.caption(
+        "Los filtros afectan los indicadores agregados, mapas, comparaciones y tablas del panel. "
+        "Una selección vacía de empresas equivale a incluir todas."
+    )
+
+    all_companies = sorted(base_scores["Empresa"].dropna().astype(str).unique().tolist(), key=str.casefold)
+    all_levels = ["Crítico", "Inicial", "En construcción", "Avanzado"]
+    all_provinces = sorted({p for values in province_map.values() for p in values}, key=str.casefold)
+
+    f1, f2 = st.columns([1.55, 1])
+    with f1:
+        selected_companies = st.multiselect(
+            "Empresas",
+            all_companies,
+            default=[],
+            placeholder="Todas las empresas",
+            key="admin_filter_companies",
+        )
+    with f2:
+        selected_levels = st.multiselect(
+            "Nivel general",
+            all_levels,
+            default=all_levels,
+            key="admin_filter_levels",
+        )
+
+    f3, f4 = st.columns([1.2, 1])
+    with f3:
+        selected_provinces = st.multiselect(
+            "Provincia de operación",
+            all_provinces,
+            default=[],
+            placeholder="Todas las provincias",
+            key="admin_filter_provinces",
+        )
+    with f4:
+        score_range = st.slider(
+            "Rango de avance general",
+            min_value=0,
+            max_value=100,
+            value=(0, 100),
+            step=1,
+            key="admin_filter_score_range",
+        )
+
+    score_table = base_scores.copy()
+    if selected_companies:
+        score_table = score_table[score_table["Empresa"].isin(selected_companies)].copy()
+    if selected_levels:
+        score_table = score_table[score_table["Nivel"].isin(selected_levels)].copy()
+    else:
+        score_table = score_table.iloc[0:0].copy()
+    score_numeric = pd.to_numeric(score_table["Avance general"], errors="coerce")
+    score_table = score_table[(score_numeric >= score_range[0]) & (score_numeric <= score_range[1])].copy()
+
+    if selected_provinces and not score_table.empty:
+        wanted_provinces = set(selected_provinces)
+        score_table = score_table[
+            score_table["Empresa"].apply(
+                lambda company: bool(
+                    province_map.get(normalize_company(company), set()) & wanted_provinces
+                )
+            )
+        ].copy()
+
+    selected_names = set(score_table["Empresa"].astype(str).tolist())
+    filtered = latest[latest[company_col].astype(str).isin(selected_names)].copy()
+
+    if filtered.empty:
+        st.warning("Los filtros actuales no devuelven empresas. Ajuste la selección para continuar.")
+        return
+
+    st.markdown(
+        f"**Empresas incluidas:** {len(filtered)} de {len(latest)} · "
+        f"**Registros históricos en fuente:** {len(df)}"
+    )
+
+    admin_section = st.radio(
+        "Vista administrativa",
+        ["Resumen general", "Comparación y brechas", "Detalle por empresa", "Datos y calidad"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="admin_subnavigation",
+    )
+
+    # ========================================================
+    # RESUMEN GENERAL
+    # ========================================================
+    if admin_section == "Resumen general":
+        total_score, principle_scores, company_scores = calculate_public_scores(filtered)
+        levels = public_level_counts(company_scores)
+        objective_table = admin_objective_average_table(filtered)
+        indicator_table = admin_indicator_average_table(filtered)
+        province_df, _ = province_counts_from_repeat_sheets(repeat_sheets, filtered)
+        locality_geo_df, _ = georeferenced_localities_from_repeat_sheets(repeat_sheets, filtered)
+        company_geo_df = public_georeferenced_points(filtered)
+
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.metric("Empresas", len(filtered))
+        k2.metric("Avance promedio", score_display(total_score))
+        k3.metric("Nivel promedio", level_from_score(total_score))
+        k4.metric("Provincias", len(province_df))
+        k5.metric("Localidades GPS", len(locality_geo_df))
+
+        left, right = st.columns([0.8, 1.4])
+        with left:
+            st.plotly_chart(
+                donut(total_score, "Avance agregado", height=280),
+                use_container_width=True,
+                config=CHART_CONFIG,
+                key="admin_general_donut",
+            )
+        with right:
+            st.markdown("#### Distribución de empresas por nivel")
+            st.plotly_chart(
+                public_levels_figure(levels),
+                use_container_width=True,
+                config=CHART_CONFIG,
+                key="admin_general_levels",
+            )
+
+        st.markdown("#### Avance promedio por principio WEPs")
+        st.plotly_chart(
+            public_weps_figure(principle_scores),
+            use_container_width=True,
+            config=CHART_CONFIG,
+            key="admin_general_weps",
+        )
+
+        st.markdown("#### Cobertura territorial del conjunto filtrado")
+        render_professional_ecuador_map(
+            province_df,
+            locality_geo_df,
+            company_geo_df,
+            height=520,
+        )
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("#### Objetivos")
+            st.plotly_chart(
+                admin_objectives_figure(objective_table),
+                use_container_width=True,
+                config=CHART_CONFIG,
+                key="admin_general_objectives",
+            )
+        with c2:
+            st.markdown("#### Principales brechas de indicadores")
+            st.plotly_chart(
+                admin_indicator_gaps_figure(indicator_table, 12),
+                use_container_width=True,
+                config=CHART_CONFIG,
+                key="admin_general_indicator_gaps",
+            )
+
+        with st.expander("Ver tabla completa de objetivos"):
+            display_obj = objective_table.copy()
+            display_obj["Avance promedio"] = display_obj["Avance promedio"].apply(
+                lambda x: None if pd.isna(x) else round(float(x), 1)
+            )
+            st.dataframe(display_obj, use_container_width=True, hide_index=True)
+
+        with st.expander("Ver tabla completa de 48 indicadores"):
+            display_ind = indicator_table.copy()
+            display_ind["Avance promedio"] = display_ind["Avance promedio"].apply(
+                lambda x: None if pd.isna(x) else round(float(x), 1)
+            )
+            st.dataframe(display_ind, use_container_width=True, hide_index=True)
+
+    # ========================================================
+    # COMPARACIÓN Y BRECHAS
+    # ========================================================
+    elif admin_section == "Comparación y brechas":
+        st.markdown("#### Matriz comparativa empresa × principio WEPs")
+        st.plotly_chart(
+            admin_heatmap_figure(score_table),
+            use_container_width=True,
+            config=CHART_CONFIG,
+            key="admin_heatmap",
+        )
+
+        ranking = score_table.copy().sort_values("Avance general", ascending=False, na_position="last")
+        ranking_display = ranking.copy()
+        for col in ["Avance general"] + [f"WEP {i}" for i in range(1, 8)]:
+            ranking_display[col] = pd.to_numeric(ranking_display[col], errors="coerce").round(1)
+        st.markdown("#### Ranking y perfil de avance por empresa")
+        st.dataframe(ranking_display, use_container_width=True, hide_index=True)
+
+        selector_type = st.selectbox(
+            "Comparar resultados por",
+            ["Principio WEPs", "Objetivo", "Indicador"],
+            key="admin_compare_type",
+        )
+        comparison_rows: list[dict[str, Any]] = []
+
+        if selector_type == "Principio WEPs":
+            pid = st.selectbox(
+                "Principio",
+                list(range(1, 8)),
+                format_func=lambda x: f"WEP {x} · {next(p['title'] for p in PRINCIPLES if p['id'] == x)}",
+                key="admin_compare_wep",
+            )
+            for _, row in filtered.iterrows():
+                objective_scores = {oid: objective_score(row, filtered, oid) for oid in OBJECTIVES}
+                score = principle_score(row, filtered, pid, objective_scores)
+                comparison_rows.append({"Empresa": str(row.get(company_col, "")), "Avance": score})
+
+        elif selector_type == "Objetivo":
+            oid = st.selectbox(
+                "Objetivo",
+                list(OBJECTIVES.keys()),
+                format_func=lambda x: f"Objetivo {x} · {OBJECTIVES[x]['title']}",
+                key="admin_compare_objective",
+            )
+            for _, row in filtered.iterrows():
+                comparison_rows.append({
+                    "Empresa": str(row.get(company_col, "")),
+                    "Avance": objective_score(row, filtered, oid),
+                })
+
+        else:
+            iid = st.selectbox(
+                "Indicador",
+                list(INDICATORS.keys()),
+                format_func=lambda x: f"Indicador {x} · {INDICATORS[x]['title']}",
+                key="admin_compare_indicator",
+            )
+            for _, row in filtered.iterrows():
+                comparison_rows.append({
+                    "Empresa": str(row.get(company_col, "")),
+                    "Avance": indicator_score(row, filtered, iid),
+                })
+
+        comparison = pd.DataFrame(comparison_rows).dropna(subset=["Avance"]).sort_values("Avance")
+        if not comparison.empty:
+            fig = go.Figure(
+                go.Bar(
+                    x=comparison["Avance"],
+                    y=comparison["Empresa"],
+                    orientation="h",
+                    marker_color=[color_from_score(v) for v in comparison["Avance"]],
+                    text=[f"{v:.1f}%" for v in comparison["Avance"]],
+                    textposition="auto",
+                    hovertemplate="%{y}<br>%{x:.1f}%<extra></extra>",
+                )
+            )
+            fig.update_layout(
+                height=max(330, min(900, 100 + len(comparison) * 34)),
+                xaxis=dict(range=[0, 100], ticksuffix="%", fixedrange=True),
+                yaxis=dict(fixedrange=True, automargin=True),
+                margin=dict(l=10, r=10, t=20, b=20),
+                showlegend=False,
+                dragmode=False,
+            )
+            st.plotly_chart(fig, use_container_width=True, config=CHART_CONFIG, key="admin_comparison_bar")
+        else:
+            st.info("No existen valores calculados para la selección actual.")
+
+    # ========================================================
+    # DETALLE POR EMPRESA
+    # ========================================================
+    elif admin_section == "Detalle por empresa":
+        company_options = sorted(filtered[company_col].dropna().astype(str).unique().tolist(), key=str.casefold)
+        selected_company = st.selectbox(
+            "Empresa a revisar sin código de acceso",
+            company_options,
+            key="admin_company_detail",
+        )
+        company_rows = filtered[
+            filtered[company_col].apply(normalize_company) == normalize_company(selected_company)
+        ].copy()
+        if company_rows.empty:
+            st.warning("No se encontró la empresa seleccionada dentro del conjunto filtrado.")
+        else:
+            row = latest_row(company_rows)
+            st.info(
+                "Vista administrativa: se presenta exactamente el mismo diagnóstico detallado disponible para la empresa, "
+                "sin solicitar su CLAVE de acceso."
+            )
+            render_result(row, filtered, selected_company)
+
+            st.divider()
+            st.markdown("### Respuestas completas de la encuesta")
+            search = st.text_input(
+                "Buscar campo o valor",
+                key="admin_field_search",
+                placeholder="Ej.: remuneración, comité, capacitación, RUC...",
+            )
+            field_table = _admin_nonempty_field_table(row, search)
+            st.dataframe(field_table, use_container_width=True, hide_index=True, height=520)
+
+            st.markdown("### Registros repetibles vinculados")
+            found_repeat = False
+            for sheet_name, sheet_df in repeat_sheets.items():
+                company_repeat = _admin_filter_repeat_for_company(
+                    sheet_df,
+                    latest,
+                    company_col,
+                    selected_company,
+                )
+                if company_repeat.empty:
+                    continue
+                found_repeat = True
+                with st.expander(f"{sheet_name} · {len(company_repeat)} registro(s)"):
+                    show = company_repeat.drop(columns=["__admin_company"], errors="ignore").copy()
+                    nonempty_cols = [
+                        col for col in show.columns
+                        if show[col].notna().any() and show[col].astype(str).str.strip().ne("").any()
+                    ]
+                    st.dataframe(show[nonempty_cols], use_container_width=True, hide_index=True)
+            if not found_repeat:
+                st.caption("No se encontraron filas repeat vinculadas de forma inequívoca a esta empresa.")
+
+    # ========================================================
+    # DATOS Y CALIDAD
+    # ========================================================
+    else:
+        st.markdown("### Calidad de la fuente y estructura KOBO")
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Filas cargadas", len(df))
+        d2.metric("Empresas únicas", latest[company_col].nunique())
+        d3.metric("Columnas", len(df.columns))
+        d4.metric("Hojas repeat", len(repeat_sheets))
+
+        st.write(f"Columna empresa detectada: `{company_col}`")
+        st.write(f"Campo de acceso detectado: `{code_col}`")
+        valid_code_cols = detect_access_code_columns(df)
+        st.write(f"Columnas válidas para código de acceso: `{valid_code_cols}`")
+
+        if valid_code_cols:
+            code_debug = []
+            for col in valid_code_cols:
+                if col in df.columns:
+                    nonempty = df[col].apply(normalize_access_code).ne("")
+                    code_debug.append({
+                        "columna": col,
+                        "valores no vacíos": int(nonempty.sum()),
+                        "valores únicos": int(df.loc[nonempty, col].apply(normalize_access_code).nunique()),
+                    })
+            if code_debug:
+                st.markdown("#### Cobertura del campo de acceso")
+                st.dataframe(pd.DataFrame(code_debug), use_container_width=True, hide_index=True)
+
+        repeat_debug = []
+        for sheet_name, sheet_df in repeat_sheets.items():
+            repeat_debug.append({
+                "hoja": sheet_name,
+                "filas": len(sheet_df),
+                "columnas": len(sheet_df.columns),
+                "provincia detectada": detect_repeat_province_column(sheet_df),
+                "GPS localidad detectado": detect_repeat_geopoint_column(sheet_df),
+            })
+        if repeat_debug:
+            st.markdown("#### Hojas repeat")
+            st.dataframe(pd.DataFrame(repeat_debug), use_container_width=True, hide_index=True)
+
+        score_fields = (
+            [p["score_field"] for p in PRINCIPLES]
+            + [o["score_field"] for o in OBJECTIVES.values()]
+            + [i["score_field"] for i in INDICATORS.values()]
+        )
+        found = []
+        missing = []
+        for field in score_fields:
+            col = find_field_column(df, field)
+            if col:
+                found.append({"campo esperado": field, "columna encontrada": col})
+            else:
+                missing.append({"campo esperado": field})
+
+        q1, q2 = st.columns(2)
+        with q1:
+            st.markdown(f"#### Campos de cálculo encontrados ({len(found)})")
+            st.dataframe(pd.DataFrame(found), use_container_width=True, hide_index=True, height=430)
+        with q2:
+            st.markdown(f"#### Campos de cálculo no encontrados ({len(missing)})")
+            if missing:
+                st.dataframe(pd.DataFrame(missing), use_container_width=True, hide_index=True, height=430)
+            else:
+                st.success("Todos los campos de cálculo esperados fueron detectados.")
+
+        st.markdown("#### Columnas de la tabla principal")
+        st.dataframe(pd.DataFrame({"columna": list(df.columns)}), use_container_width=True, hide_index=True, height=500)
+
+        csv_data = filtered.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "Descargar registros filtrados (CSV)",
+            data=csv_data,
+            file_name="turismo_violeta_admin_filtrado.csv",
+            mime="text/csv",
+            key="admin_download_filtered",
+        )
+
+
 def render_diagnostics(
     df: pd.DataFrame,
     company_col: str | None,
     code_col: str | None,
     repeat_sheets: dict[str, pd.DataFrame] | None = None,
 ) -> None:
-    st.subheader("Diagnóstico técnico")
-    password = st.text_input("Clave de administrador", type="password")
+    st.subheader("Panel administrativo integral")
+    st.caption(
+        "Acceso privado para revisar todas las empresas, comparar resultados, filtrar la base y abrir el detalle completo "
+        "de cada organización sin solicitar su código individual."
+    )
+
+    password = st.text_input("Clave de administrador", type="password", key="admin_dashboard_password")
     if password != get_secret("ADMIN_PASSWORD", "TurismoVioleta2026"):
-        st.warning("Ingrese la clave de administrador para ver el diagnóstico.")
+        st.warning("Ingrese la clave de administrador para acceder al panel integral.")
         return
 
-    st.write(f"Versión: {APP_VERSION}")
-    st.write(f"Filas cargadas: {len(df)}")
-    st.write(f"Columnas cargadas: {len(df.columns)}")
-    st.write(f"Columna empresa detectada: {company_col}")
-    st.write(f"Campo de acceso de la encuesta detectado: {code_col}")
-    valid_code_cols = detect_access_code_columns(df)
-    st.write(f"Columnas válidas para código de acceso: {valid_code_cols}")
-    if valid_code_cols:
-        code_debug = []
-        for col in valid_code_cols:
-            if col in df.columns:
-                nonempty = df[col].apply(normalize_access_code).ne("")
-                code_debug.append({
-                    "columna": col,
-                    "valores no vacíos": int(nonempty.sum()),
-                    "valores únicos": int(df.loc[nonempty, col].apply(normalize_access_code).nunique()),
-                })
-        if code_debug:
-            st.write("Cobertura del campo de código en la exportación:")
-            st.dataframe(pd.DataFrame(code_debug), use_container_width=True, hide_index=True)
+    st.success("Acceso administrativo habilitado.")
+    st.caption(f"Versión: {APP_VERSION}")
 
-    repeat_sheets = repeat_sheets or {}
-    st.write(f"Hojas repeat detectadas: {list(repeat_sheets.keys()) if repeat_sheets else 'Ninguna'}")
-    if repeat_sheets:
-        repeat_debug = []
-        for sheet_name, sheet_df in repeat_sheets.items():
-            repeat_debug.append(
-                {
-                    "hoja": sheet_name,
-                    "filas": len(sheet_df),
-                    "columnas": len(sheet_df.columns),
-                    "provincia detectada": detect_repeat_province_column(sheet_df),
-                    "GPS localidad detectado": detect_repeat_geopoint_column(sheet_df),
-                }
-            )
-        st.write("Diagnóstico de hojas repeat:")
-        st.dataframe(pd.DataFrame(repeat_debug), use_container_width=True, hide_index=True)
+    if st.button(
+        "Actualizar datos desde KOBO",
+        help="Limpia el caché y vuelve a descargar la exportación configurada en KOBO_DATA_URL.",
+        key="admin_refresh_kobo",
+    ):
+        st.cache_data.clear()
+        st.rerun()
 
-    score_fields = [p["score_field"] for p in PRINCIPLES] + [o["score_field"] for o in OBJECTIVES.values()] + [i["score_field"] for i in INDICATORS.values()]
-    found = []
-    missing = []
-    for field in score_fields:
-        col = find_field_column(df, field)
-        if col:
-            found.append({"campo esperado": field, "columna encontrada": col})
-        else:
-            missing.append({"campo esperado": field})
-    st.write("Campos de cálculo encontrados:")
-    st.dataframe(pd.DataFrame(found), use_container_width=True, hide_index=True)
-    st.write("Campos de cálculo no encontrados:")
-    st.dataframe(pd.DataFrame(missing), use_container_width=True, hide_index=True)
-
-    st.write("Primeras columnas detectadas:")
-    st.dataframe(pd.DataFrame({"columna": list(df.columns)[:120]}), use_container_width=True, hide_index=True)
-
+    render_admin_dashboard(df, company_col, code_col, repeat_sheets)
 
 def main() -> None:
     render_header()
