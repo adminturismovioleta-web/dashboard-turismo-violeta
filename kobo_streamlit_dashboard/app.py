@@ -33,7 +33,7 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-APP_VERSION = 'v23.4 · resultados del diagnóstico V18'
+APP_VERSION = 'v23.5 · diagnóstico V18 y consulta compacta'
 MODEL_VERSION = 'TV_SCREENING_20261021_V18_VMT'
 DASHBOARD_URL = 'https://dashboard-turismo-violeta.streamlit.app/'
 SCREENING_SPEC = {'dimensions': [{'id': 1, 'title': 'Gobernanza, compromiso institucional y liderazgo', 'weight': 15},
@@ -1016,18 +1016,18 @@ PLAN_STAGES = (
 )
 DEFAULT_KOBO_DATA_URL = SCREENING_SPEC['export']['data_url_xlsx']
 ROUTE_LABELS = {
-    'proteccion_prioritaria': 'Fortalecer protección primero',
-    'completar_informacion': 'Completar información',
-    'continuar_diagnostico': 'Continuar a diagnóstico detallado',
-    'continuar_acompanamiento': 'Continuar con acompañamiento',
-    'no_evaluable': 'Sin valoración V18',
+    'proteccion_prioritaria': 'Empezar por la protección',
+    'completar_informacion': 'Completar las respuestas',
+    'continuar_diagnostico': 'Revisar con más detalle',
+    'continuar_acompanamiento': 'Empezar las mejoras con apoyo',
+    'no_evaluable': 'Sin resultado V18',
 }
 ROUTE_TEXT = {
-    'proteccion_prioritaria': 'Primero, fortalecer medidas básicas de protección con acompañamiento. No avanzar aún a una valoración de mayor madurez.',
-    'completar_informacion': 'Completar o verificar la información antes de decidir el siguiente paso.',
-    'continuar_diagnostico': 'Continuar a un diagnóstico más detallado y contrastar las prácticas con evidencia.',
-    'continuar_acompanamiento': 'Continuar con acompañamiento inicial para cerrar las brechas identificadas.',
-    'no_evaluable': 'Este registro no reúne las condiciones para calcular el diagnóstico V18.',
+    'proteccion_prioritaria': 'Conviene empezar por las medidas básicas de protección y buscar apoyo para ponerlas en marcha.',
+    'completar_informacion': 'Hace falta completar o confirmar algunas respuestas antes de decidir cómo continuar.',
+    'continuar_diagnostico': 'El siguiente paso es revisar los avances con más detalle y reunir los documentos que los respaldan.',
+    'continuar_acompanamiento': 'Se puede empezar por una o dos mejoras, con apoyo para definir responsables y plazos.',
+    'no_evaluable': 'Hace falta revisar o completar este registro para obtener un resultado con el diagnóstico V18.',
 }
 ROUTE_COLORS = {'proteccion_prioritaria':'#C2414A','completar_informacion':'#A16207',
                 'continuar_diagnostico':'#16815A','continuar_acompanamiento':'#75449B','no_evaluable':'#64748B'}
@@ -1072,6 +1072,40 @@ QUESTION_PURPOSES = {
     'weps_04': 'La revisión de remuneraciones permite identificar diferencias entre mujeres y hombres que realizan trabajos iguales o de igual valor. Esta respuesta no determina el tamaño de una brecha salarial.',
     'weps_18': 'La formación en igualdad de género permite traducir los compromisos del plan en prácticas de trabajo y responsabilidades compartidas.',
     'tv_riesgos_laborales_genero': 'Revisar los riesgos laborales con perspectiva de género permite adecuar la prevención a las tareas, los equipos y las necesidades del personal.',
+}
+QUESTION_MESSAGES = {
+    'weps_31': ('De acuerdo con la respuesta, la empresa ya cuenta con un plan u otra herramienta para organizar su trabajo en igualdad.', 'Preparar una herramienta sencilla que reúna los objetivos de igualdad, las acciones y las personas responsables.'),
+    'weps_06': ('Ya hay una persona o un equipo a cargo de impulsar las acciones de igualdad, con funciones definidas.', 'Acordar quién se hará cargo de las acciones de igualdad y dejar claras sus funciones.'),
+    'weps_05': ('La empresa ya toma medidas para que más mujeres participen en puestos de liderazgo y espacios donde predominan los hombres.', 'Identificar qué dificulta la participación de las mujeres y poner en marcha una medida para reducir esa barrera.'),
+    'weps_28': ('Según lo indicado en la encuesta, el plan se revisa cada año y se dejan por escrito los ajustes acordados.', 'Revisar los resultados del plan con el equipo responsable y acordar los ajustes, las personas a cargo y los plazos.'),
+    'weps_30': ('La empresa comunica lo que hace en igualdad y cuenta con documentos que respaldan esos avances.', 'Reunir los documentos que muestran los avances en igualdad y usarlos para dar a conocer lo realizado.'),
+    'weps_33': ('La empresa revisa cada año qué necesidades de cuidado tiene su personal.', 'Conversar con el personal sobre sus necesidades de cuidado y dejar un registro que se revise cada año.'),
+    'weps_07': ('De acuerdo con la respuesta, se aplican los derechos y permisos de cuidado y se facilitan los apoyos y las condiciones de lactancia que corresponden.', 'Revisar los permisos, los apoyos de cuidado y las condiciones de lactancia, y atender lo que todavía haga falta.'),
+    'weps_08': ('Ya se ajustan horarios, permisos u otras condiciones de trabajo para facilitar las responsabilidades de cuidado.', 'Elegir un ajuste de horarios, permisos o turnos que ayude al personal a atender sus responsabilidades de cuidado.'),
+    'weps_35': ('Existe un registro de los apoyos de cuidado que solicitan y reciben las mujeres y los hombres del equipo.', 'Llevar un registro sencillo de los apoyos de cuidado solicitados y utilizados por mujeres y hombres.'),
+    'tv_cuidados_comunicacion': ('El personal recibe información sobre las medidas de cuidado que se aplican en la empresa.', 'Explicar al personal qué apoyos de cuidado se están aplicando y cómo puede acceder a ellos.'),
+    'weps_38': ('Se revisan las condiciones de acceso y cuidado de las experiencias turísticas y se hacen mejoras a partir de los comentarios de visitantes.', 'Revisar las condiciones de acceso y cuidado, escuchar a visitantes y acordar una mejora concreta.'),
+    'weps_39': ('La empresa ya facilita la participación de negocios de mujeres, organizaciones comunitarias y proveedores locales.', 'Elegir una medida que facilite trabajar con negocios de mujeres, organizaciones comunitarias o proveedores locales.'),
+    'weps_24': ('La igualdad y la prevención de la violencia forman parte de los criterios para trabajar con proveedores.', 'Incluir compromisos de igualdad y prevención de la violencia al elegir proveedores y acordar cómo se trabajará con ellos.'),
+    'tv_proveedores_respuesta_vbg': ('Ya se ha definido cómo actuar ante violencia, acoso, abuso o discriminación en la relación con proveedores.', 'Acordar los pasos y las personas responsables de actuar ante estos incidentes en la relación con proveedores.'),
+    'weps_21': ('Se realizan actividades para fortalecer las capacidades de los grupos de mujeres que proveen bienes o servicios a la empresa.', 'Preguntar a los grupos de mujeres proveedoras qué apoyo necesitan y organizar una actividad para fortalecer sus capacidades.'),
+    'weps_26': ('Las condiciones de pago están claras, se cumplen los acuerdos y se reconoce el trabajo de las mujeres.', 'Acordar condiciones claras de pago, reconocer el trabajo de las mujeres y revisar que los acuerdos se cumplan.'),
+    'weps_27': ('Las mujeres participan en los acuerdos sobre la difusión de sus saberes y el uso de sus conocimientos e imágenes.', 'Acordar con las mujeres involucradas cómo se difundirán sus saberes y cómo podrán usarse sus conocimientos e imágenes.'),
+    'weps_36': ('Se revisan los riesgos que pueden afectar de manera distinta a mujeres y personas en mayor situación de vulnerabilidad durante las actividades turísticas.', 'Revisar una experiencia turística, identificar a quiénes pueden afectar sus riesgos y acordar medidas de seguridad e inclusión.'),
+    'weps_37': ('Las personas visitantes reciben información sobre convivencia y ayuda, y el personal de contacto ha recibido capacitación reciente.', 'Explicar a turistas las normas y los canales de ayuda y capacitar al personal que les atiende.'),
+    'weps_22': ('La empresa tiene criterios para comunicar sin estereotipos y revisa sus mensajes e imágenes.', 'Acordar criterios de comunicación inclusiva y revisar una pieza de comunicación para corregir posibles sesgos.'),
+    'weps_09': ('Existe un compromiso de cero tolerancia frente a la violencia, el acoso y la discriminación, aprobado y dado a conocer.', 'Aprobar y dar a conocer el compromiso de cero tolerancia frente a la violencia, el acoso y la discriminación.'),
+    'weps_12': ('La empresa cuenta con un procedimiento escrito para prevenir y atender situaciones de violencia, acoso o discriminación.', 'Escribir los pasos para prevenir y atender estas situaciones, señalando quién actúa y dónde se puede buscar apoyo.'),
+    'weps_15': ('Hay canales confidenciales y accesibles para comunicar una situación y opciones de atención dentro y fuera de la empresa.', 'Habilitar un canal accesible y confidencial y explicar cómo recibir atención dentro y fuera de la empresa.'),
+    'weps_16': ('Se conocen las rutas oficiales de protección y se ha definido cómo actuar y avisar a las autoridades ante una sospecha.', 'Identificar las rutas oficiales y acordar quién activa la protección y avisa a las autoridades ante una sospecha de trata o explotación sexual.'),
+    'weps_17': ('El personal y quienes atienden los reportes han recibido formación reciente para prevenir la violencia y responder de forma adecuada.', 'Organizar una capacitación para el personal y quienes atienden reportes, cuidando la confidencialidad y evitando que las personas afectadas tengan que repetir innecesariamente su relato.'),
+    'weps_23': ('La empresa ya tiene pasos definidos para atender incidentes que afectan a turistas, al personal o a las comunidades vinculadas.', 'Acordar qué hacer y quién debe actuar cuando un incidente afecte a turistas, al personal o a las comunidades vinculadas.'),
+    'weps_01': ('La selección y contratación de personal ya incorporan criterios de igualdad y evitan sesgos de género.', 'Revisar los requisitos y los anuncios de contratación para quitar sesgos que puedan excluir a mujeres u hombres.'),
+    'weps_02': ('Hay criterios claros para crecer dentro de la empresa y se revisan las oportunidades que reciben mujeres y hombres.', 'Explicar los criterios para ascender y acceder a formación y revisar cómo se distribuyen esas oportunidades entre mujeres y hombres.'),
+    'weps_03': ('El personal tiene igualdad de oportunidades para acceder a la formación profesional.', 'Revisar cómo se ofrecen las capacitaciones y facilitar que mujeres y hombres tengan las mismas oportunidades de participar.'),
+    'weps_04': ('La empresa compara las remuneraciones y corrige las diferencias sin justificación entre trabajos iguales o de igual valor.', 'Comparar las remuneraciones de trabajos iguales o de igual valor y acordar cómo corregir las diferencias que no tengan justificación.'),
+    'weps_18': ('Ya se están realizando actividades del plan de capacitación en igualdad de género.', 'Preparar un plan de capacitación en igualdad de género y realizar una primera actividad.'),
+    'tv_riesgos_laborales_genero': ('Se revisan los riesgos del trabajo con perspectiva de género y se aplican medidas para prevenirlos.', 'Revisar los riesgos físicos, ergonómicos y psicosociales del trabajo y aplicar una medida que responda a las tareas y necesidades del personal.'),
 }
 RESPONSE_LABELS = {'si':'Sí','no':'No','ns':'No sabe / por verificar','sin_respuesta':'Sin respuesta',
                    'invalida':'Por verificar (valor no reconocido)','no_aplica':'No aplica','aplicabilidad_pendiente':'Perfil por confirmar'}
@@ -1500,9 +1534,9 @@ def quote_survey(value: Any) -> str:
 
 def diagnostic_reading(result: dict[str,Any]) -> dict[str,str]:
     totals=result['totals']
-    summary=f"De {totals['aplicables']} prácticas aplicables a la empresa, se declararon {totals['si']} existentes y {totals['no']} pendientes de implementar."
+    summary=f"De acuerdo con las respuestas, la empresa ya aplica {totals['si']} de las {totals['aplicables']} medidas que corresponden a su actividad. Quedan {totals['no']} por poner en marcha."
     if totals['por_verificar']:summary+=f" Además, hay {totals['por_verificar']} respuestas por confirmar."
-    if result['score'] is not None:summary+=' Al considerar el peso de cada práctica y dimensión, el resultado es '+percent(result['score'])+'.'
+    if result['score'] is not None:summary+=' Teniendo en cuenta el peso de cada tema, el resultado general es '+percent(result['score'])+'.'
     # These fragments are copied literally from the survey, so quotation marks
     # distinguish them from the interpretation and recommendations that follow.
     names={'weps_09':'política o declaración vigente de cero tolerancia',
@@ -1513,27 +1547,27 @@ def diagnostic_reading(result: dict[str,Any]) -> dict[str,str]:
     route=result['route']
     if route=='proteccion_prioritaria':
         title='Por dónde empezar: reforzar las medidas básicas de protección'
-        action='Se respondió '+quote_survey('No')+' en las preguntas sobre '+join_words(missing)+'. Estas medidas deben atenderse entre las primeras acciones del Plan de Igualdad, con apoyo para definir responsables y formas de actuación.'
+        action='En la encuesta aparece la respuesta '+quote_survey('No')+' en las preguntas sobre '+join_words(missing)+'. Conviene empezar por estas medidas y acordar quién se hará cargo y cómo se pondrán en marcha.'
     elif route=='completar_informacion':
         title='Por dónde empezar: completar la información pendiente'
         action='Conviene confirmar las respuestas pendientes antes de decidir el siguiente paso del diagnóstico.'
         if result['plan']['pending']:action+=' En particular, hace falta aclarar la situación del Plan de Igualdad, que se explica más abajo.'
     elif route=='continuar_diagnostico':
         title='Siguiente paso: profundizar el diagnóstico'
-        action='Las respuestas permiten continuar a una revisión más detallada. El siguiente paso es comprobar los avances con sus respaldos y precisar los compromisos de mejora.'
+        action='De acuerdo con las respuestas, se puede pasar a una revisión más detallada. El siguiente paso es reunir los documentos que muestran los avances y acordar qué mejoras se van a realizar.'
     else:
         title='Por dónde empezar: organizar las primeras mejoras'
         action='Conviene elegir una o dos de las mejoras identificadas y definir quién las realizará, qué apoyo se necesita y cuándo se revisará su avance.'
     if result['coverage'] is not None and math.isclose(result['coverage'],100):
-        information='El 100 % de información respondida significa que las preguntas aplicables tienen respuesta. El avance de las prácticas se expresa en el resultado ponderado.'
+        information='Se respondieron todas las preguntas que corresponden a la actividad de la empresa. El avance se muestra en el resultado general.'
     else:
-        information='La información respondida muestra cuánto se conoce de las prácticas aplicables. Las respuestas pendientes no se interpretan como un '+quote_survey('No')+'.'
+        information='Todavía hay respuestas por confirmar. Completar esa información ayudará a entender mejor la situación de la empresa.'
     return {'summary':summary,'title':title,'action':action,'information':information}
 
 
 def plan_presentation(result: dict[str,Any]) -> dict[str,Any]:
     plan=result['plan']
-    intro='Esta sección explica cómo se encuentra el Plan de Igualdad: si está por escrito, si tiene aprobación interna, si sus acciones se están ejecutando y si se ha dado a conocer.'
+    intro='Para conocer la situación del Plan de Igualdad, se revisa si está escrito, si fue aprobado, si sus acciones ya están en marcha y si el equipo lo conoce.'
     if not plan['active']:
         response=next(p['response'] for p in result['practices'] if p['name']=='weps_31')
         summary=('La respuesta '+quote_survey('No')+' indica que la empresa todavía no cuenta con un Plan de Igualdad ni con otra herramienta de planificación para la igualdad. La primera acción es definir objetivos, acciones y responsables.' if response=='no' else 'Todavía falta confirmar si la empresa cuenta con un Plan de Igualdad u otra herramienta para organizar sus acciones de igualdad.')
@@ -1545,9 +1579,9 @@ def plan_presentation(result: dict[str,Any]) -> dict[str,Any]:
     selected=[PLAN_DESCRIPTIONS[code][2] for code,_,_ in PLAN_STAGES if code in plan['confirmed']]
     selected_quotes=[quote_survey(SCREENING_SPEC['plan_options'][code]) for code,_,_ in PLAN_STAGES if code in plan['confirmed']]
     pending=[PLAN_DESCRIPTIONS[code][3] for code,_,_ in PLAN_STAGES if code not in plan['confirmed']]
-    summary=('En el formulario se seleccionó '+join_words(selected_quotes)+'. Esto indica que '+join_words(selected)+'.') if selected else 'No se seleccionó información sobre estos cuatro aspectos del plan.'
+    summary=('En la encuesta se marcó '+join_words(selected_quotes)+'. Según esa respuesta, '+join_words(selected)+'.') if selected else 'Todavía no hay información sobre estos cuatro aspectos del plan.'
     if pending:summary+=' Queda por confirmar '+join_words(pending)+'.'
-    if plan['invalid']:summary+=' La selección contiene datos contradictorios o no reconocidos y necesita revisarse.'
+    if plan['invalid']:summary+=' Algunas opciones no coinciden entre sí o no se pudieron interpretar. Conviene revisarlas.'
     aspects=[{'code':code,'title':PLAN_DESCRIPTIONS[code][0],'meaning':PLAN_DESCRIPTIONS[code][1],
               'selected':code in plan['confirmed'],'next_action':PLAN_DESCRIPTIONS[code][4] if code not in plan['confirmed'] else ''} for code,_,_ in PLAN_STAGES]
     return {'intro':intro,'summary':summary,'aspects':aspects,'pending':bool(pending or plan['pending'])}
@@ -1556,20 +1590,21 @@ def plan_presentation(result: dict[str,Any]) -> dict[str,Any]:
 def question_analysis(practice: dict[str,Any], dimension: dict[str,Any]) -> dict[str,Any]:
     purpose=QUESTION_PURPOSES[practice['name']]
     if practice['applies'] is not True:
-        comment='Esta pregunta no se incluye en el resultado porque no corresponde al perfil que declaró la empresa.' if practice['applies'] is False else 'Hace falta completar el perfil de la empresa para saber si esta pregunta corresponde a su actividad.'
+        comment='Según el perfil indicado en la encuesta, esta pregunta no corresponde a la actividad de la empresa y queda fuera del resultado.' if practice['applies'] is False else 'Hace falta completar el perfil de la empresa para saber si esta pregunta corresponde a su actividad.'
     elif practice['response'] in {'si','no'}:
         if practice['response']=='si':
-            comment=purpose+' La respuesta '+quote_survey('Sí')+' reconoce una práctica que la empresa ya declara realizar. Conviene mantenerla y conservar un respaldo sencillo de su aplicación.'
+            comment=QUESTION_MESSAGES[practice['name']][0]+' '+purpose
         else:
-            comment=purpose+' La respuesta '+quote_survey('No')+' identifica un ámbito de mejora. Primera acción: '+practice['action']
+            comment=purpose+' Para empezar: '+QUESTION_MESSAGES[practice['name']][1]
     else:
-        comment=purpose+' Hace falta confirmar si esta práctica existe para reconocer un avance o definir una mejora.'
+        comment='Antes de sacar una conclusión, conviene confirmar si esta medida ya se aplica. '+purpose
     return {'comment':comment,'response_label':RESPONSE_LABELS[practice['status']]}
 
 
 def plan_rows(result: dict[str,Any]) -> list[dict[str,Any]]:
     rows=[{'Dimensión':p['dimension'],'Pregunta':p['name'],'Práctica evaluada':p['question'],
-             'Estado':RESPONSE_LABELS[p['status']],'Avance declarado':p['finding'],'Acción inicial':p['next_action'],
+             'Estado':RESPONSE_LABELS[p['status']],'Avance':QUESTION_MESSAGES[p['name']][0] if p['applies'] is True and p['response']=='si' else '',
+             'Acción inicial':QUESTION_MESSAGES[p['name']][1] if p['applies'] is True and p['response']=='no' else (p['next_action'] if p['applies'] is True and p['response'] not in {'si','no'} else ''),
              'WEP principal':p['wep'],'WEP vinculados':p['secondary'],'Objetivo del plan':p['objective'],
              'Alcance de medición':p['limit']} for p in result['practices']]
     dimensions={d['id']:d for d in result['dimensions']}
@@ -1584,8 +1619,8 @@ def plan_rows(result: dict[str,Any]) -> list[dict[str,Any]]:
             items=[(code,positive,code in plan['confirmed'],'' if code in plan['confirmed'] else action.strip()) for code,positive,action in PLAN_STAGES]
         for code,positive,confirmed,action in items:
             rows.append({'Dimensión':'Planificación complementaria','Pregunta':'tv_plan_etapas/'+code,
-                         'Práctica evaluada':positive,'Estado':'Declarada' if confirmed else 'Por confirmar o completar',
-                         'Avance declarado':positive if confirmed else '', 'Acción inicial':action,
+                         'Práctica evaluada':positive,'Estado':'Indicado en la encuesta' if confirmed else 'Por confirmar o completar',
+                         'Avance':positive if confirmed else '', 'Acción inicial':action,
                          'WEP principal':1,'WEP vinculados':'7','Objetivo del plan':QUESTION_MAP['weps_31']['objective'],
                          'Alcance de medición':'Información descriptiva de las etapas. No añade peso al índice ni mide ejecución del plan.'})
     return rows
@@ -1605,40 +1640,67 @@ def score_svg(score: float|None, title: str) -> str:
     return f'<figure class="tv-donut"><svg viewBox="0 0 120 120" width="190" height="190" role="img" aria-label="{esc(title)}: {esc(percent(score))}">{ring}{center}</svg><figcaption>{esc(title)}</figcaption></figure>'
 
 
-def question_report_block(practice: dict[str,Any], dimension: dict[str,Any], position: int) -> str:
+QUESTIONS_TABLE_CSS = '''
+.tv-questions-wrap{border:1px solid #DDD6E5;border-radius:10px;overflow:hidden;margin:14px 0 22px;background:#FFFFFF;color:#253346}
+.tv-questions-table{width:100%;table-layout:fixed;border-collapse:collapse;margin:0;font-size:14px;line-height:1.55}
+.tv-questions-table th{background:#F3EDF8;color:#542778;font-weight:650;text-align:left;padding:12px 14px;border:0;border-bottom:1px solid #DDD6E5}
+.tv-questions-table td{vertical-align:top;text-align:left;padding:13px 14px;border:0;white-space:normal;overflow-wrap:anywhere;word-break:normal;color:#253346;background:#FFFFFF}
+.tv-questions-table tbody tr+tr td{border-top:1px solid #E8E3EC}
+.tv-questions-table .tv-question-number{font-weight:700;color:#75449B;margin-right:5px}
+.tv-questions-table .tv-response{display:inline-block;border-radius:6px;padding:4px 9px;font-weight:650;font-size:13px;white-space:normal}
+.tv-questions-table .tv-response.advance{background:#E8F7EE;color:#145A40}.tv-questions-table .tv-response.improvement{background:#FFF4DF;color:#854D0E}
+.tv-questions-table .tv-response.verify{background:#EAF2FF;color:#1E40AF}.tv-questions-table .tv-response.neutral{background:#F1F3F6;color:#64748B}
+.tv-questions-table .tv-comment-copy{border-left:3px solid #C6B0D9;padding-left:10px;line-height:1.55}
+.tv-questions-table .tv-comment-copy[data-status="si"]{border-color:#16815A}.tv-questions-table .tv-comment-copy[data-status="no"]{border-color:#D97706}
+.tv-questions-table .tv-question-meta{font-size:12px;color:#62586D;line-height:1.5;margin-top:8px}
+@media(max-width:760px){.tv-questions-table colgroup,.tv-questions-table thead{display:none}.tv-questions-table,.tv-questions-table tbody,.tv-questions-table tr,.tv-questions-table td{display:block;width:100%;box-sizing:border-box}.tv-questions-table tr{padding:10px 14px}.tv-questions-table tbody tr+tr{border-top:1px solid #E8E3EC}.tv-questions-table td{padding:5px 0;border:0!important}.tv-questions-table td:before{content:attr(data-label);display:block;font-size:12px;font-weight:650;color:#62586D;margin-bottom:4px}}
+'''
+
+
+def objective_label(value: str) -> str:
+    match=re.match(r'^(O\d{2}(?:/O\d{2})*),\s*(.+)$',value)
+    if not match:return value
+    title=match[2]
+    return title[0].upper()+title[1:]+' ('+match[1]+')'
+
+
+def questions_table_html(practices: list[dict[str,Any]], dimension: dict[str,Any]) -> str:
     esc=lambda value:html.escape(text_value(value))
-    view=question_analysis(practice,dimension)
-    color='advance' if practice['status']=='si' else ('improvement' if practice['status']=='no' else ('neutral' if practice['status']=='no_aplica' else 'verify'))
-    context='<p><strong>Objetivo del Plan de Igualdad:</strong> '+esc(practice['objective'])+'</p>'
-    return '<article class="tv-question"><h3>Pregunta '+str(position)+'. '+esc(quote_survey(practice['question']))+'</h3><p class="'+color+'"><strong>Respuesta: '+esc(quote_survey(view['response_label']))+'</strong></p><div class="tv-question-comment"><strong>Comentario sobre esta respuesta</strong><p>'+esc(view['comment'])+'</p></div>'+context+'</article>'
+    rows=[]
+    for position,practice in enumerate(practices,1):
+        view=question_analysis(practice,dimension)
+        color='advance' if practice['status']=='si' else ('improvement' if practice['status']=='no' else ('neutral' if practice['status']=='no_aplica' else 'verify'))
+        answer=quote_survey(view['response_label']) if practice['status'] in {'si','no'} else view['response_label']
+        weps=str(practice['wep'])+(' (relación con '+practice['secondary']+')' if practice['secondary'] else '')
+        weight=f"{practice['weight']:g}".replace('.',',')+' %'
+        rows.append('<tr data-question="'+esc(practice['name'])+'">'
+            '<td data-label="Pregunta"><span class="tv-question-number">'+str(position)+'.</span> '+esc(quote_survey(practice['question']))+'</td>'
+            '<td data-label="Respuesta"><span class="tv-response '+color+'">'+esc(answer)+'</span></td>'
+            '<td data-label="Comentario y primer paso"><div class="tv-comment-copy" data-status="'+esc(practice['status'])+'">'+esc(view['comment'])+'</div></td>'
+            '<td data-label="Relación con el plan">'+esc(objective_label(practice['objective']))+'<div class="tv-question-meta">WEP: '+esc(weps)+'<br>Peso de la pregunta: '+esc(weight)+'</div></td></tr>')
+    return '<div class="tv-questions-wrap"><table class="tv-questions-table"><colgroup><col style="width:34%"><col style="width:9%"><col style="width:40%"><col style="width:17%"></colgroup><thead><tr><th>Pregunta</th><th>Respuesta</th><th>Comentario y primer paso</th><th>Relación con el plan</th></tr></thead><tbody>'+''.join(rows)+'</tbody></table></div>'
 
 
 def html_report(name: str, result: dict[str,Any], record: Mapping[str,Any]) -> bytes:
     esc=lambda x:html.escape(text_value(x))
     blocks=[]
     for d in result['dimensions']:
-        rows=[p for p in plan_rows(result) if p['Dimensión']==d['title']]
-        body=''
-        for row in rows:
-            status_class='advance' if row['Estado']=='Sí' else ('improvement' if row['Estado']=='No' else ('neutral' if row['Estado']=='No aplica' else 'verify'))
-            body+='<tr class="'+status_class+'">'+''.join('<td>'+esc(row[k])+'</td>' for k in ['Práctica evaluada','Estado','Avance declarado','Acción inicial'])+'</tr>'
-        chart=score_svg(d['score'],'Prácticas declaradas') if d['applicable'] else '<p>No aplica al perfil declarado.</p>'
-        observations=''.join('<p class="advance">'+esc(item)+'</p>' for item in d['advances'])
-        observations+=''.join('<p class="improvement"><strong>Ámbito de mejora:</strong> '+esc(item)+'</p>' for item in d['actions'])
-        observations+=''.join('<p class="verify"><strong>Por confirmar:</strong> '+esc(item)+'</p>' for item in d['verify'])
         questions=[p for p in result['practices'] if p['dim']==d['id']]
-        question_blocks=''.join(question_report_block(p,d,i) for i,p in enumerate(questions,1))
-        blocks.append(f"<h2>{d['id']}. {esc(d['title'])}</h2><p>Prácticas declaradas: {percent(d['score'])}. Información disponible: {percent(d['coverage'])}.</p>{chart}{observations}<h3>Preguntas que sustentan este resultado</h3>{question_blocks}<details><summary>Ver tabla de preguntas</summary><table><thead><tr><th>Práctica</th><th>Estado</th><th>Avance</th><th>Primera acción</th></tr></thead><tbody>{body}</tbody></table></details>")
+        chart=score_svg(d['score'],'Avance en esta dimensión') if d['applicable'] else '<p>Esta dimensión no corresponde a la actividad indicada en la encuesta.</p>'
+        observations=''.join('<p class="advance">'+esc(QUESTION_MESSAGES[p['name']][0])+'</p>' for p in questions if p['applies'] is True and p['response']=='si')
+        observations+=''.join('<p class="improvement"><strong>Para empezar:</strong> '+esc(QUESTION_MESSAGES[p['name']][1])+'</p>' for p in questions if p['applies'] is True and p['response']=='no')
+        observations+=''.join('<p class="verify"><strong>Por confirmar:</strong> '+esc(item)+'</p>' for item in d['verify'])
+        blocks.append(f"<h2>{d['id']}. {esc(d['title'])}</h2><p>Avance: {percent(d['score'])}. Información respondida: {percent(d['coverage'])}.</p>{chart}{observations}<h3>Preguntas, respuestas y comentarios</h3>{questions_table_html(questions,d)}")
     links=''.join(f'<p><a href="{esc(r[1])}">{esc(r[0])}</a></p>' for r in SCREENING_SPEC['resources'])
     presentation=plan_presentation(result)
     plan_block='<h2>Situación del Plan de Igualdad</h2><p>'+esc(presentation['intro'])+'</p><p class="verify">'+esc(presentation['summary'])+'</p>'
     for aspect in presentation['aspects']:
-        status=('Se seleccionó '+quote_survey(SCREENING_SPEC['plan_options'][aspect['code']])+' en el formulario.') if aspect['selected'] else 'No se seleccionó esta opción. Hace falta confirmar su situación.'
+        status=('En la encuesta se marcó '+quote_survey(SCREENING_SPEC['plan_options'][aspect['code']])+'.') if aspect['selected'] else 'No se marcó esta opción. Conviene confirmar si ya se cumple o si todavía está pendiente.'
         next_action='<p><strong>Siguiente paso:</strong> '+esc(aspect['next_action'])+'</p>' if aspect['next_action'] else ''
         plan_block+='<article class="tv-question"><h3>'+esc(aspect['title'])+'</h3><p>'+esc(aspect['meaning'])+'</p><p class="'+('advance' if aspect['selected'] else 'verify')+'">'+esc(status)+'</p>'+next_action+'</article>'
     detail=text_value(RecordFields(record).get('tv_comunicacion_igualdad_detalle')).strip() if normalize_response(RecordFields(record).get('weps_30'))=='si' else ''
-    if detail:plan_block+='<h2>Documentos de comunicación declarados</h2><p>'+esc(quote_survey(detail))+'</p>'
-    overview=score_svg(result['score'],'Índice general ponderado')
+    if detail:plan_block+='<h2>Documentos mencionados en la encuesta</h2><p>'+esc(quote_survey(detail))+'</p>'
+    overview=score_svg(result['score'],'Resultado general')
     reading=diagnostic_reading(result)
     for d in result['dimensions']:
         value=d['score']
@@ -1646,11 +1708,12 @@ def html_report(name: str, result: dict[str,Any], record: Mapping[str,Any]) -> b
         overview+=f'<div class="tv-score-row"><span>D{d["id"]}. {esc(d["title"])}</span>{bars}<strong>{esc(percent(value))}</strong></div>'
     content=f'''<!doctype html><html lang="es"><meta charset="utf-8"><title>Diagnóstico Turismo Violeta</title>
 <style>body{{font:15px Georgia,serif;color:#253346;max-width:1100px;margin:35px auto;padding:0 20px}}h1,h2{{color:#542778}}table{{border-collapse:collapse;width:100%;margin:20px 0}}th,td{{border:1px solid #ddd;padding:9px;vertical-align:top;text-align:left}}th{{background:#f2eaf7}}.advance{{background:#E8F7EE;color:#145A40}}.improvement{{background:#FFF4DF;color:#854D0E}}.verify{{background:#EAF2FF;color:#1E40AF}}p.advance,p.improvement,p.verify{{padding:13px 16px;border-radius:8px}}p.improvement{{border-left:4px solid #D97706}}.neutral{{color:#64748B}}.tv-donut{{margin:12px 0;text-align:center;width:220px}}.tv-donut figcaption{{font-weight:bold}}.tv-score-row{{display:grid;grid-template-columns:minmax(240px,1.5fr) 1fr 115px;gap:16px;align-items:center;margin:16px 0}}.tv-track{{height:14px;border-radius:7px;background:#F1F3F6;overflow:hidden}}.tv-track div{{height:100%;background:#16815A}}.tv-track.unavailable{{background:#D8DDE5}}.tv-reading{{background:#FAF7FD;border-left:5px solid #75449B;padding:18px 22px;border-radius:10px;line-height:1.65;margin:20px 0}}.tv-question{{border:1px solid #E8DDF1;padding:16px 20px;margin:18px 0;border-radius:10px;break-inside:avoid}}.tv-question h3{{font-size:16px;line-height:1.55}}.tv-question-comment{{background:#FAFAFC;color:#253346;border-left:3px solid #C6B0D9;padding:14px 18px;margin:16px 0;line-height:1.6}}.tv-question-comment p{{margin:8px 0 0}}@media print{{body{{print-color-adjust:exact;-webkit-print-color-adjust:exact}}table{{font-size:10px}}h2{{break-after:avoid}}tr{{break-inside:avoid}}details table{{display:table}}}}@media(max-width:650px){{.tv-score-row{{grid-template-columns:1fr;gap:5px}}}}</style>
+<style>{QUESTIONS_TABLE_CSS}</style>
 <h1>Turismo Violeta: diagnóstico inicial</h1><h2>{esc(name)}</h2><p>Fecha: {esc(date_display(record))}. Modelo: {MODEL_VERSION}.</p>
-<p>Índice de prácticas declaradas: <b>{percent(result['score'])}</b>. Información disponible: <b>{percent(result['coverage'])}</b>.</p>
+<p>Avance inicial: <b>{percent(result['score'])}</b>. Información respondida: <b>{percent(result['coverage'])}</b>.</p>
 <div class="tv-reading"><h2>Lectura del diagnóstico</h2><p>{esc(reading['summary'])}</p><p><strong>{esc(reading['title'])}</strong></p><p>{esc(reading['action'])}</p><p>{esc(reading['information'])}</p></div>
-<p>Verde: avances declarados. Ámbar: ámbitos de mejora. Azul: información por confirmar.</p>
-<h2>Gráficos del diagnóstico</h2>{overview}<p>Los porcentajes corresponden a prácticas ponderadas con respuesta conocida. La información disponible se muestra por separado.</p>
+<p>Verde: lo que ya está en marcha. Ámbar: lo que se puede mejorar. Azul: lo que falta confirmar.</p>
+<h2>Resultados del diagnóstico</h2>{overview}<p>Los resultados tienen en cuenta el peso de cada tema y las respuestas que se pudieron confirmar.</p>
 {plan_block}{''.join(blocks)}<h2>Dimensiones transversales</h2><p>Comunicación y mejora continua reutilizan respuestas y no añaden puntos al índice.</p>
 <h2>Herramientas</h2>{links}<p><a href="{DASHBOARD_URL}">Consultar el dashboard</a></p></html>'''
     return content.encode('utf-8')
@@ -1765,7 +1828,7 @@ def public_provinces(entries: list[dict[str,Any]]) -> list[dict[str,Any]]:
 def render_header() -> None:
     st.title('Dashboard empresarial | Turismo Violeta')
     st.caption(APP_VERSION)
-    st.write('Diagnóstico inicial de prácticas de igualdad: seis dimensiones priorizadas y dos ejes transversales. Consulta agregada y resultados de empresa mediante el código creado en el formulario.')
+    st.write('Una primera mirada a cómo está la empresa en igualdad de género y por dónde puede empezar a mejorar. Los resultados se organizan en seis dimensiones y dos temas transversales.')
 
 
 def public_css() -> None:
@@ -1786,6 +1849,7 @@ def public_css() -> None:
     .tv-answer.advance {background:#E8F7EE;color:#145A40}.tv-answer.improvement {background:#FFF4DF;color:#854D0E}
     .tv-answer.verify {background:#EAF2FF;color:#1E40AF}.tv-answer.neutral {background:#F1F3F6;color:#64748B}
     </style>''',unsafe_allow_html=True)
+    st.markdown('<style>'+QUESTIONS_TABLE_CSS+'</style>',unsafe_allow_html=True)
 
 
 def metric_cards(cards: list[tuple[str,Any]]) -> None:
@@ -1798,7 +1862,7 @@ def score_figure(score: float|None, title: str, height: int=250) -> Any:
     known=score is not None and math.isfinite(score)
     fig=go.Figure(go.Pie(
         values=[score,100-score] if known else [1],
-        labels=['Prácticas declaradas ponderadas','Prácticas pendientes ponderadas'] if known else ['Sin información'],
+        labels=['Avances según las respuestas','Por mejorar'] if known else ['Sin información'],
         hole=.78,sort=False,direction='clockwise',rotation=0,
         marker=dict(colors=[STATUS_COLORS['yes'],STATUS_COLORS['no']] if known else [STATUS_COLORS['empty']],line=dict(color='white',width=2)),
         textinfo='none',hovertemplate='%{label}: %{value:.1f} %<extra></extra>' if known else None,
@@ -1812,7 +1876,7 @@ def score_figure(score: float|None, title: str, height: int=250) -> Any:
 def practice_counts_figure(dimensions: list[dict[str,Any]]) -> Any:
     labels=[f"D{d['id']}" for d in dimensions]
     fig=go.Figure()
-    for field,label,color in [('yes','Avances declarados',STATUS_COLORS['yes']),('no','Ámbitos de mejora',STATUS_COLORS['no']),('unknown','Por confirmar',STATUS_COLORS['unknown'])]:
+    for field,label,color in [('yes','En marcha',STATUS_COLORS['yes']),('no','Por mejorar',STATUS_COLORS['no']),('unknown','Por confirmar',STATUS_COLORS['unknown'])]:
         fig.add_trace(go.Bar(x=[d[field] for d in dimensions],y=labels,name=label,orientation='h',marker_color=color,
                             text=[str(d[field]) if d[field] else '' for d in dimensions],textposition='inside',
                             customdata=[d['title'] for d in dimensions],hovertemplate='%{customdata}<br>'+label+': %{x}<extra></extra>'))
@@ -1823,14 +1887,8 @@ def practice_counts_figure(dimensions: list[dict[str,Any]]) -> Any:
     return fig
 
 
-def render_question(practice: dict[str,Any], dimension: dict[str,Any], position: int, key: str) -> None:
-    view=question_analysis(practice,dimension)
-    color='advance' if practice['status']=='si' else ('improvement' if practice['status']=='no' else ('neutral' if practice['status']=='no_aplica' else 'verify'))
-    with st.container(border=True):
-        st.markdown(f"**Pregunta {position}. {quote_survey(practice['question'])}**")
-        st.markdown(f'<div class="tv-answer {color}">Respuesta: {html.escape(quote_survey(view["response_label"]))}</div>',unsafe_allow_html=True)
-        st.markdown('<div class="tv-question-comment"><strong>Comentario sobre esta respuesta</strong><p>'+html.escape(view['comment'])+'</p></div>',unsafe_allow_html=True)
-        st.write('**Objetivo del Plan de Igualdad:** '+practice['objective'])
+def render_questions(practices: list[dict[str,Any]], dimension: dict[str,Any]) -> None:
+    st.markdown(questions_table_html(practices,dimension),unsafe_allow_html=True)
 
 
 def dimension_figure(dimensions: list[dict[str,Any]], title: str='') -> Any:
@@ -1838,7 +1896,7 @@ def dimension_figure(dimensions: list[dict[str,Any]], title: str='') -> Any:
     fig=go.Figure(go.Bar(x=values,y=[f"D{d['id']}. {d['title']}" for d in dimensions],orientation='h',
                         marker_color='#75449B',text=[percent(x) for x in values],textposition='outside',cliponaxis=False))
     fig.update_layout(title=title,height=410,margin=dict(l=10,r=100,t=30,b=30),
-                      xaxis=dict(range=[0,105],title='Prácticas declaradas (%)',fixedrange=True),
+                      xaxis=dict(range=[0,105],title='Avance inicial (%)',fixedrange=True),
                       yaxis=dict(autorange='reversed',fixedrange=True,automargin=True),showlegend=False)
     return fig
 
@@ -1864,7 +1922,7 @@ def plan_stage_rows(result: dict[str,Any]) -> list[dict[str,Any]]:
     plan=result['plan']
     if not plan['active'] or plan['other_tool']:return []
     return [{'Etapa':SCREENING_SPEC['plan_options'][code],
-             'Estado':'Declarada' if code in plan['confirmed'] else 'Por confirmar o completar',
+             'Estado':'Indicado en la encuesta' if code in plan['confirmed'] else 'Por confirmar o completar',
              'Primera acción':'' if code in plan['confirmed'] else action.strip()} for code,_,action in PLAN_STAGES]
 
 
@@ -1881,16 +1939,16 @@ def render_plan(record: Mapping[str,Any], result: dict[str,Any]) -> None:
                     st.markdown('**'+aspect['title']+'**')
                     st.write(aspect['meaning'])
                     if aspect['selected']:
-                        st.success('Se seleccionó '+quote_survey(SCREENING_SPEC['plan_options'][aspect['code']])+' en el formulario.')
+                        st.success('En la encuesta se marcó '+quote_survey(SCREENING_SPEC['plan_options'][aspect['code']])+'.')
                     else:
-                        st.info('No se seleccionó esta opción. Hace falta confirmar su situación.')
+                        st.info('No se marcó esta opción. Conviene confirmar si ya se cumple o si todavía está pendiente.')
                         st.write('**Siguiente paso:** '+aspect['next_action'])
-    st.caption('Estos aspectos describen la organización del plan y no agregan puntos al resultado general.')
+    st.caption('Esta información ayuda a entender cómo se organiza el plan. Se muestra por separado del resultado general.')
     f=RecordFields(record)
     if normalize_response(f.get('weps_30'))=='si':
         detail=text_value(f.get('tv_comunicacion_igualdad_detalle')).strip()
         if detail:
-            st.markdown('**Documentos utilizados para comunicar acciones y avances**')
+            st.markdown('**Documentos mencionados en la encuesta**')
             st.write(quote_survey(detail))
     evidence=text_value(f.get('evidencia_institucional_URL')).strip()
     if evidence:
@@ -1907,58 +1965,54 @@ def render_result(entry: dict[str,Any], key: str='company') -> None:
         st.info('Este registro no se puede valorar con el modelo V18. Se requiere una respuesta completa del formulario actualizado.')
         for issue in result['issues']:st.caption(issue)
         return
-    metric_cards([('Prácticas declaradas',percent(result['score'])),('Información disponible',percent(result['coverage'])),('Prácticas por implementar',result['totals']['no']),('Prácticas por verificar',result['totals']['por_verificar'])])
+    metric_cards([('Avance inicial',percent(result['score'])),('Información respondida',percent(result['coverage'])),('Medidas por poner en marcha',result['totals']['no']),('Respuestas por confirmar',result['totals']['por_verificar'])])
     reading=diagnostic_reading(result)
     esc=lambda value:html.escape(text_value(value))
     st.markdown('<div class="tv-reading"><h3>Lectura del diagnóstico</h3><p>'+esc(reading['summary'])+'</p><p><strong>'+esc(reading['title'])+'</strong></p><p>'+esc(reading['action'])+'</p><p class="tv-information">'+esc(reading['information'])+'</p></div>',unsafe_allow_html=True)
-    if result['provisional']:st.info('Hay información u observaciones de calidad que necesitan revisarse para completar esta lectura.')
+    if result['provisional']:st.info('Todavía hay información que necesita revisarse para completar el diagnóstico.')
     if result['critical_pending']:st.warning(f"Hay {result['critical_pending']} medidas básicas de protección por verificar.")
-    if result['differences']:st.warning('El recálculo encuentra diferencias con los resultados exportados por Kobo. Se muestra el cálculo reconstruido; la administración puede revisar el detalle.')
-    st.caption('Verde: avances declarados. Ámbar: ámbitos de mejora. Azul: información por confirmar.')
+    if result['differences']:st.warning('Hay diferencias entre este resultado y el que aparece en Kobo. La administración puede revisar el detalle para aclararlas.')
+    st.caption('Verde: lo que ya está en marcha. Ámbar: lo que se puede mejorar. Azul: lo que falta confirmar.')
     general,comparison=st.columns([1,2])
     with general:
-        st.plotly_chart(score_figure(result['score'],'Índice general ponderado',height=330),width='stretch',config=CHART_CONFIG,key=key+'_general_donut')
+        st.plotly_chart(score_figure(result['score'],'Resultado general',height=330),width='stretch',config=CHART_CONFIG,key=key+'_general_donut')
     with comparison:
         st.plotly_chart(dimension_figure(result['dimensions']),width='stretch',config=CHART_CONFIG,key=key+'_dims')
     st.plotly_chart(practice_counts_figure(result['dimensions']),width='stretch',config=CHART_CONFIG,key=key+'_response_counts')
     render_plan(record,result)
     for d in result['dimensions']:
         with st.expander(f"{d['id']}. {d['title']}",expanded=True):
+            questions=[p for p in result['practices'] if p['dim']==d['id']]
             if d['applicable']==0:
-                st.info('No aplica al perfil declarado de la empresa.');continue
-            st.caption(f"Peso de la dimensión: {d['weight']:g} %. Prácticas declaradas: {percent(d['score'])}. Información disponible: {percent(d['coverage'])}.")
+                st.info('Según la actividad indicada en la encuesta, esta dimensión no corresponde a la empresa.');continue
+            st.caption(f"Peso de esta dimensión en el resultado general: {d['weight']:g} %. Avance: {percent(d['score'])}. Información respondida: {percent(d['coverage'])}.")
             chart,counts=st.columns([1,2])
             with chart:
-                st.plotly_chart(score_figure(d['score'],'Prácticas declaradas',height=210),width='stretch',config=CHART_CONFIG,key=f"{key}_donut_d{d['id']:02d}")
+                st.plotly_chart(score_figure(d['score'],'Avance en esta dimensión',height=210),width='stretch',config=CHART_CONFIG,key=f"{key}_donut_d{d['id']:02d}")
             with counts:
                 st.markdown('**Respuestas de esta dimensión**')
-                metric_cards([('Avances declarados',d['yes']),('Ámbitos de mejora',d['no']),('Por confirmar',d['unknown'])])
+                metric_cards([('En marcha',d['yes']),('Por mejorar',d['no']),('Por confirmar',d['unknown'])])
             left,right=st.columns(2)
             with left:
-                st.markdown('**Lo que la empresa ya hace**')
+                st.markdown('**Lo que ya está en marcha**')
                 if d['advances']:
-                    for item in d['advances']:st.success(item)
-                else:st.write('Las respuestas todavía no identifican prácticas existentes en esta categoría.')
+                    for p in questions:
+                        if p['applies'] is True and p['response']=='si':st.success(QUESTION_MESSAGES[p['name']][0])
+                else:st.write('Por ahora, las respuestas no muestran medidas en marcha en esta dimensión.')
             with right:
-                st.markdown('**Ámbitos de mejora y primera acción**')
+                st.markdown('**Qué se puede mejorar y por dónde empezar**')
                 if d['actions']:
-                    for item in d['actions']:st.warning(item)
-                else:st.write('No se declararon prácticas faltantes en esta categoría.')
+                    for p in questions:
+                        if p['applies'] is True and p['response']=='no':st.warning(QUESTION_MESSAGES[p['name']][1])
+                else:st.write('De acuerdo con las respuestas, no hay medidas pendientes de poner en marcha en esta dimensión.')
                 if d['verify']:
                     st.markdown('**Por confirmar**')
                     for item in d['verify']:st.info(item)
-            questions=[p for p in result['practices'] if p['dim']==d['id']]
-            st.markdown('**Preguntas que sustentan este resultado**')
-            for position,practice in enumerate(questions,1):
-                render_question(practice,d,position,key+'_question')
-            detail=[{'Pregunta':p['question'],'Respuesta':RESPONSE_LABELS[p['status']],
-                     'WEP':str(p['wep'])+(' (vínculos: '+p['secondary']+')' if p['secondary'] else ''),
-                     'Objetivo del plan':p['objective'],'Peso interno (%)':p['weight']} for p in result['practices'] if p['dim']==d['id']]
-            with st.expander('Ver tabla de preguntas y vínculos con el Plan de Igualdad'):
-                st.dataframe(pd.DataFrame(detail),hide_index=True,width='stretch')
+            st.markdown('**Preguntas, respuestas y comentarios**')
+            render_questions(questions,d)
     st.subheader('Dimensiones transversales')
     for t in result['transversals']:
-        st.write(f"**{t['id']}. {t['title']}:** {t['yes']} prácticas declaradas, {t['no']} por implementar y {t['unknown']} por verificar, de {t['applicable']} aplicables.")
+        st.write(f"**{t['id']}. {t['title']}:** de {t['applicable']} medidas que corresponden a la empresa, {t['yes']} ya están en marcha, {t['no']} están pendientes y {t['unknown']} necesitan confirmarse.")
     st.caption('Estas dimensiones reutilizan respuestas y no añaden puntos al índice. Los vínculos con WEPs y objetivos son parciales; no equivalen a medir todos sus resultados.')
     f=RecordFields(record);commitments=multiple_selection(f,'compromisos_iniciales',SCREENING_SPEC['commitment_options'])['selected']
     if commitments:
@@ -2020,22 +2074,22 @@ def aggregate_practices(entries: list[dict[str,Any]]) -> list[dict[str,Any]]:
         rows.append({'Dimensión':q['dim'],'Indicador':q['name'],'Práctica':q['question'],'Empresas aplicables':len(items),
                      'Sí':yes,'No':no,'Por verificar':unknown,'% Sí entre respuestas conocidas':100*yes/(yes+no) if yes+no else None,
                      'Información disponible (%)':100*(yes+no)/len(items) if items else None,
-                     'Acción inicial':q['action'],'WEP principal':q['wep'],'Objetivo del plan':q['objective']})
+                     'Acción inicial':QUESTION_MESSAGES[q['name']][1],'WEP principal':q['wep'],'Objetivo del plan':q['objective']})
     return rows
 
 
 def render_public_summary(entries: list[dict[str,Any]], records_n: int) -> None:
     summary=summarize(entries);valid=summary['evaluable']
     st.subheader('Resumen público')
-    metric_cards([('Empresas con diagnóstico V18',summary['companies']),('Índice promedio',percent(summary['score'])),
-                  ('Información disponible promedio',percent(summary['coverage'])),('Dimensiones priorizadas',6)])
-    st.caption(f"Se utiliza el último registro por empresa. {summary['scores_n']} empresas aportan un índice calculable. El promedio es una media entre empresas, no un porcentaje de cumplimiento normativo.")
+    metric_cards([('Empresas con diagnóstico V18',summary['companies']),('Avance promedio',percent(summary['score'])),
+                  ('Información respondida',percent(summary['coverage'])),('Dimensiones',6)])
+    st.caption(f"Se toma la respuesta más reciente de cada empresa. En {summary['scores_n']} empresas hay información para calcular un resultado. El promedio resume esos resultados y ayuda a comparar los avances.")
     if not valid:st.info('Aún no hay diagnósticos V18 válidos para resumir. Los registros de otras versiones se revisan por separado en administración.');return
-    if not summary['same_parameters']:st.warning('Existen empresas evaluadas con ponderaciones o umbrales diferentes. Los promedios se omiten; la administración puede filtrar por esquema de cálculo.')
-    st.caption('La ausencia de información no equivale a ausencia de prácticas. Los resultados son declaraciones iniciales que requieren contraste con evidencia.')
+    if not summary['same_parameters']:st.warning('Algunas empresas tienen pesos o criterios de cálculo distintos. Para compararlas, la administración debe elegir un mismo esquema de cálculo.')
+    st.caption('Esta primera mirada se basa en lo indicado en las encuestas. El siguiente paso es revisar los avances con los documentos que los respaldan.')
     a,b=st.columns([1.3,1])
     with a:
-        st.markdown('**Prácticas declaradas por dimensión**')
+        st.markdown('**Avances por dimensión**')
         st.plotly_chart(dimension_figure(summary['dimensions']),width='stretch',config=CHART_CONFIG,key='public_dimensions')
     with b:
         st.markdown('**Siguiente paso recomendado**')
@@ -2048,9 +2102,9 @@ def render_public_summary(entries: list[dict[str,Any]], records_n: int) -> None:
     gaps=sorted([r for r in table if r['No']],key=lambda r:(-r['No'],r['Indicador']))[:5]
     a,b=st.columns(2)
     with a:
-        st.markdown('**Prácticas ya declaradas**')
+        st.markdown('**Lo que ya está en marcha**')
         for r in positives:
-            if r['Sí']:st.write(f"{r['Sí']} empresas: {QUESTION_MAP[r['Indicador']]['positive']}")
+            if r['Sí']:st.write(f"{r['Sí']} empresas: {QUESTION_MESSAGES[r['Indicador']][0]}")
     with b:
         st.markdown('**Acciones iniciales más frecuentes**')
         for r in gaps:st.write(f"{r['No']} empresas: {r['Acción inicial']}")
@@ -2060,11 +2114,11 @@ def render_public_summary(entries: list[dict[str,Any]], records_n: int) -> None:
 
 def company_summary_row(e: dict[str,Any]) -> dict[str,Any]:
     r=e['result']
-    return {'Empresa':e['company'],'Provincia':province_label(e['record']),'Índice (%)':r['score'],
-            'Información disponible (%)':r['coverage'],'Siguiente paso':r['route_label'],
-            'Brechas básicas VBG':r['critical_no'],'Prácticas existentes':r['totals']['si'],
-            'Prácticas faltantes':r['totals']['no'],'Por verificar':r['totals']['por_verificar'],
-            'Etapas del plan declaradas':r['plan']['count'] if r['plan']['active'] and not r['plan']['other_tool'] else None,
+    return {'Empresa':e['company'],'Provincia':province_label(e['record']),'Avance (%)':r['score'],
+            'Información respondida (%)':r['coverage'],'Siguiente paso':r['route_label'],
+            'Medidas de protección pendientes':r['critical_no'],'Medidas en marcha':r['totals']['si'],
+            'Medidas pendientes':r['totals']['no'],'Por confirmar':r['totals']['por_verificar'],
+            'Aspectos del plan indicados en la encuesta':r['plan']['count'] if r['plan']['active'] and not r['plan']['other_tool'] else None,
             'Otra herramienta de planificación':bool(r['plan']['other_tool']),
             'Etapas por verificar':bool(r['plan']['pending']),
             'Diferencias con Kobo':len(r['differences']),'Fecha':date_display(e['record']),
@@ -2099,13 +2153,13 @@ def render_admin_dashboard(entries: list[dict[str,Any]], records: list[dict[str,
     routes=[k for k in ROUTE_LABELS if k!='no_evaluable']
     selected_routes=c.multiselect('Siguiente paso',routes,default=routes,format_func=lambda x:ROUTE_LABELS[x],key='admin_routes')
     a,b=st.columns([1.5,1])
-    limits=a.slider('Rango de índice de prácticas declaradas',0,100,(0,100),key='admin_score_range')
-    include_unknown=b.checkbox('Incluir empresas sin índice calculable',value=True,key='admin_include_unknown')
+    limits=a.slider('Rango de avance inicial',0,100,(0,100),key='admin_score_range')
+    include_unknown=b.checkbox('Incluir empresas que todavía no tienen resultado',value=True,key='admin_include_unknown')
     filtered=[e for e in valid if (not selected or e['key'] in selected)
               and (not selected_provinces or province_label(e['record']) in selected_provinces)
               and e['result']['route'] in selected_routes
               and ((include_unknown and e['result']['score'] is None) or (e['result']['score'] is not None and limits[0]<=e['result']['score']<=limits[1]))]
-    st.caption(f"{len(filtered)} empresas V18 incluidas en los filtros; {len(historical)} últimos registros no valorables se revisan en Datos y calidad. {len(records)} envíos en la fuente.")
+    st.caption(f"Los filtros muestran {len(filtered)} empresas con diagnóstico V18. En Datos y calidad se pueden revisar {len(historical)} registros que necesitan atención. En total, la fuente contiene {len(records)} envíos.")
     view=st.radio('Vista administrativa',['Resumen general','Comparación y brechas','Detalle por empresa','Datos y calidad'],horizontal=True,key='admin_view')
     if view=='Datos y calidad':
         quality=[]
@@ -2117,13 +2171,13 @@ def render_admin_dashboard(entries: list[dict[str,Any]], records: list[dict[str,
         st.dataframe(pd.DataFrame(quality),hide_index=True,width='stretch')
         discrepancy=[{'Empresa':e['company'],**diff} for e in entries for diff in e['result']['differences']]
         if discrepancy:st.dataframe(pd.DataFrame(discrepancy),hide_index=True,width='stretch')
-        st.caption('Los resultados se reconstruyen desde las respuestas y se comparan con los campos sc_* presentes. Un campo no exportado no se considera una coincidencia comprobada.')
+        st.caption('Se vuelve a calcular el resultado a partir de las respuestas y se compara con los cálculos que vienen de Kobo. Solo se comparan los campos incluidos en la descarga.')
         st.download_button('Descargar control de calidad (CSV)',csv_bytes(quality),file_name='calidad_diagnosticos_V18.csv',mime='text/csv',key='admin_quality_download')
         return
     if not filtered:st.info('Los filtros no devuelven diagnósticos V18.');return
     summary=summarize(filtered)
     if view=='Resumen general':
-        metric_cards([('Empresas',len(filtered)),('Índice promedio',percent(summary['score'])),('Información promedio',percent(summary['coverage'])),('Con diferencias de cálculo',summary['discrepancies'])])
+        metric_cards([('Empresas',len(filtered)),('Avance promedio',percent(summary['score'])),('Información respondida',percent(summary['coverage'])),('Con diferencias de cálculo',summary['discrepancies'])])
         if not summary['same_parameters']:st.warning('Filtrar un esquema de cálculo para obtener promedios comparables.')
         a,b=st.columns([1.3,1])
         with a:st.plotly_chart(dimension_figure(summary['dimensions']),width='stretch',config=CHART_CONFIG,key='admin_dims')
@@ -2139,7 +2193,7 @@ def render_admin_dashboard(entries: list[dict[str,Any]], records: list[dict[str,
             fig.update_layout(height=max(350,min(900,len(filtered)*34+100)),yaxis=dict(autorange='reversed',automargin=True))
             st.plotly_chart(fig,width='stretch',config=CHART_CONFIG,key='admin_heatmap')
         practices=aggregate_practices(filtered)
-        st.markdown('**Prácticas, brechas y acciones por indicador de screening**')
+        st.markdown('**Avances, mejoras y primeros pasos por pregunta**')
         st.dataframe(pd.DataFrame(practices),hide_index=True,width='stretch')
         a,b=st.columns(2)
         a.download_button('Descargar comparación (CSV)',csv_bytes(table),file_name='comparacion_empresas_V18.csv',mime='text/csv',key='admin_comparison_download')
