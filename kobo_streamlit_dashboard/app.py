@@ -33,7 +33,7 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-APP_VERSION = 'v23.0 · diagnóstico inicial V18'
+APP_VERSION = 'v23.1 · diagnóstico inicial V18 con gráficos'
 MODEL_VERSION = 'TV_SCREENING_20261021_V18_VMT'
 DASHBOARD_URL = 'https://dashboard-turismo-violeta.streamlit.app/'
 SCREENING_SPEC = {'dimensions': [{'id': 1, 'title': 'Gobernanza, compromiso institucional y liderazgo', 'weight': 15},
@@ -1032,6 +1032,7 @@ ROUTE_TEXT = {
 ROUTE_COLORS = {'proteccion_prioritaria':'#C2414A','completar_informacion':'#A16207',
                 'continuar_diagnostico':'#16815A','continuar_acompanamiento':'#75449B','no_evaluable':'#64748B'}
 CHART_CONFIG = {'displayModeBar':False,'staticPlot':True,'scrollZoom':False,'responsive':True}
+STATUS_COLORS = {'yes':'#16815A','no':'#D97706','unknown':'#3B82F6','empty':'#D8DDE5'}
 RESPONSE_LABELS = {'si':'Sí','no':'No','ns':'No sabe / por verificar','sin_respuesta':'Sin respuesta',
                    'invalida':'Por verificar (valor no reconocido)','no_aplica':'No aplica','aplicabilidad_pendiente':'Perfil por confirmar'}
 
@@ -1468,28 +1469,56 @@ def plan_rows(result: dict[str,Any]) -> list[dict[str,Any]]:
     return rows
 
 
+def score_svg(score: float|None, title: str) -> str:
+    """Standalone, printable chart for the downloaded HTML report."""
+    esc=lambda value:html.escape(text_value(value))
+    known=score is not None and math.isfinite(score)
+    base=STATUS_COLORS['no'] if known else STATUS_COLORS['empty']
+    ring=f'<circle cx="60" cy="60" r="43" fill="none" stroke="{base}" stroke-width="13"/>'
+    if known:
+        ring+=f'<circle cx="60" cy="60" r="43" fill="none" stroke="{STATUS_COLORS["yes"]}" stroke-width="13" pathLength="100" stroke-dasharray="{score:g} {100-score:g}" transform="rotate(-90 60 60)"/>'
+        center=f'<text x="60" y="65" text-anchor="middle" font-size="17" fill="#253346">{esc(percent(score))}</text>'
+    else:
+        center='<text x="60" y="58" text-anchor="middle" font-size="10" fill="#62586D">Sin</text><text x="60" y="72" text-anchor="middle" font-size="10" fill="#62586D">información</text>'
+    return f'<figure class="tv-donut"><svg viewBox="0 0 120 120" width="190" height="190" role="img" aria-label="{esc(title)}: {esc(percent(score))}">{ring}{center}</svg><figcaption>{esc(title)}</figcaption></figure>'
+
+
 def html_report(name: str, result: dict[str,Any], record: Mapping[str,Any]) -> bytes:
     esc=lambda x:html.escape(text_value(x))
     blocks=[]
     for d in result['dimensions']:
         rows=[p for p in plan_rows(result) if p['Dimensión']==d['title']]
-        body=''.join('<tr>'+''.join('<td>'+esc(r[k])+'</td>' for k in ['Práctica evaluada','Estado','Avance declarado','Acción inicial'])+'</tr>' for r in rows)
-        blocks.append(f"<h2>{d['id']}. {esc(d['title'])}</h2><p>Prácticas declaradas: {percent(d['score'])}. Información disponible: {percent(d['coverage'])}.</p><table><thead><tr><th>Práctica</th><th>Estado</th><th>Avance</th><th>Primera acción</th></tr></thead><tbody>{body}</tbody></table>")
+        body=''
+        for row in rows:
+            status_class='advance' if row['Estado']=='Sí' else ('improvement' if row['Estado']=='No' else ('neutral' if row['Estado']=='No aplica' else 'verify'))
+            body+='<tr class="'+status_class+'">'+''.join('<td>'+esc(row[k])+'</td>' for k in ['Práctica evaluada','Estado','Avance declarado','Acción inicial'])+'</tr>'
+        chart=score_svg(d['score'],'Prácticas declaradas') if d['applicable'] else '<p>No aplica al perfil declarado.</p>'
+        observations=''.join('<p class="advance">'+esc(item)+'</p>' for item in d['advances'])
+        observations+=''.join('<p class="improvement"><strong>Ámbito de mejora:</strong> '+esc(item)+'</p>' for item in d['actions'])
+        observations+=''.join('<p class="verify"><strong>Por confirmar:</strong> '+esc(item)+'</p>' for item in d['verify'])
+        blocks.append(f"<h2>{d['id']}. {esc(d['title'])}</h2><p>Prácticas declaradas: {percent(d['score'])}. Información disponible: {percent(d['coverage'])}.</p>{chart}{observations}<table><thead><tr><th>Práctica</th><th>Estado</th><th>Avance</th><th>Primera acción</th></tr></thead><tbody>{body}</tbody></table>")
     links=''.join(f'<p><a href="{esc(r[1])}">{esc(r[0])}</a></p>' for r in SCREENING_SPEC['resources'])
     plan=result['plan']
     plan_block=''
     if plan['active']:
-        advances=''.join('<p>'+esc(item)+'</p>' for item in plan['advances'])
-        actions=''.join('<p>'+esc(item)+'</p>' for item in plan['actions'])
+        advances=''.join('<p class="advance">'+esc(item)+'</p>' for item in plan['advances'])
+        actions=''.join('<p class="'+('improvement' if plan['other_tool'] else 'verify')+'">'+esc(item)+'</p>' for item in plan['actions'])
         plan_block='<h2>Planificación para la igualdad de género</h2><p>'+esc(plan['state_text'])+'</p>'+advances+'<h3>Primeras acciones</h3>'+actions+'<p>Las etapas se presentan por separado y no añaden puntos al índice.</p>'
     detail=text_value(RecordFields(record).get('tv_comunicacion_igualdad_detalle')).strip() if normalize_response(RecordFields(record).get('weps_30'))=='si' else ''
     if detail:plan_block+='<h2>Documentos de comunicación declarados</h2><p>'+esc(detail)+'</p>'
+    overview=score_svg(result['score'],'Índice general ponderado')
+    for d in result['dimensions']:
+        value=d['score']
+        bars=(f'<div class="tv-track"><div style="width:{value:g}%"></div></div>' if value is not None else '<div class="tv-track unavailable"></div>')
+        overview+=f'<div class="tv-score-row"><span>D{d["id"]}. {esc(d["title"])}</span>{bars}<strong>{esc(percent(value))}</strong></div>'
     content=f'''<!doctype html><html lang="es"><meta charset="utf-8"><title>Diagnóstico Turismo Violeta</title>
-<style>body{{font:15px Georgia,serif;color:#253346;max-width:1100px;margin:35px auto;padding:0 20px}}h1,h2{{color:#542778}}table{{border-collapse:collapse;width:100%;margin:20px 0}}th,td{{border:1px solid #ddd;padding:9px;vertical-align:top;text-align:left}}th{{background:#f2eaf7}}@media print{{table{{font-size:10px}}h2{{break-after:avoid}}tr{{break-inside:avoid}}}}</style>
+<style>body{{font:15px Georgia,serif;color:#253346;max-width:1100px;margin:35px auto;padding:0 20px}}h1,h2{{color:#542778}}table{{border-collapse:collapse;width:100%;margin:20px 0}}th,td{{border:1px solid #ddd;padding:9px;vertical-align:top;text-align:left}}th{{background:#f2eaf7}}.advance{{background:#E8F7EE;color:#145A40}}.improvement{{background:#FFF4DF;color:#854D0E}}.verify{{background:#EAF2FF;color:#1E40AF}}p.advance,p.improvement,p.verify{{padding:13px 16px;border-radius:8px}}p.improvement{{border-left:4px solid #D97706}}.neutral{{color:#64748B}}.tv-donut{{margin:12px 0;text-align:center;width:220px}}.tv-donut figcaption{{font-weight:bold}}.tv-score-row{{display:grid;grid-template-columns:minmax(240px,1.5fr) 1fr 115px;gap:16px;align-items:center;margin:16px 0}}.tv-track{{height:14px;border-radius:7px;background:#FFF4DF;overflow:hidden}}.tv-track div{{height:100%;background:#16815A}}.tv-track.unavailable{{background:#D8DDE5}}@media print{{body{{print-color-adjust:exact;-webkit-print-color-adjust:exact}}table{{font-size:10px}}h2{{break-after:avoid}}tr{{break-inside:avoid}}}}@media(max-width:650px){{.tv-score-row{{grid-template-columns:1fr;gap:5px}}}}</style>
 <h1>Turismo Violeta: diagnóstico inicial</h1><h2>{esc(name)}</h2><p>Fecha: {esc(date_display(record))}. Modelo: {MODEL_VERSION}.</p>
 <p>Índice de prácticas declaradas: <b>{percent(result['score'])}</b>. Información disponible: <b>{percent(result['coverage'])}</b>.</p>
 <p><b>{esc(result['route_label'])}.</b> {esc(result['route_text'])}</p>
 <p>Resultado {'provisional' if result['provisional'] else 'completo en información declarada'}. Orienta un Plan de Igualdad; requiere contraste con evidencia.</p>
+<p>Verde: avances declarados. Ámbar: ámbitos de mejora. Azul: información por confirmar.</p>
+<h2>Gráficos del diagnóstico</h2>{overview}<p>Los porcentajes corresponden a prácticas ponderadas con respuesta conocida. La información disponible se muestra por separado.</p>
 {plan_block}{''.join(blocks)}<h2>Dimensiones transversales</h2><p>Comunicación y mejora continua reutilizan respuestas y no añaden puntos al índice.</p>
 <h2>Herramientas</h2>{links}<p><a href="{DASHBOARD_URL}">Consultar el dashboard</a></p></html>'''
     return content.encode('utf-8')
@@ -1624,6 +1653,35 @@ def metric_cards(cards: list[tuple[str,Any]]) -> None:
             st.markdown(f'<div class="tv-kpi"><div class="tv-kpi-label">{html.escape(label)}</div><div class="tv-kpi-value">{html.escape(str(value))}</div></div>',unsafe_allow_html=True)
 
 
+def score_figure(score: float|None, title: str, height: int=250) -> Any:
+    known=score is not None and math.isfinite(score)
+    fig=go.Figure(go.Pie(
+        values=[score,100-score] if known else [1],
+        labels=['Prácticas declaradas ponderadas','Prácticas pendientes ponderadas'] if known else ['Sin información'],
+        hole=.78,sort=False,direction='clockwise',rotation=0,
+        marker=dict(colors=[STATUS_COLORS['yes'],STATUS_COLORS['no']] if known else [STATUS_COLORS['empty']],line=dict(color='white',width=2)),
+        textinfo='none',hovertemplate='%{label}: %{value:.1f} %<extra></extra>' if known else None,
+        hoverinfo=None if known else 'skip'))
+    fig.add_annotation(text=percent(score) if known else 'Sin información',x=.5,y=.5,showarrow=False,font=dict(size=25 if known else 16,color='#253346'))
+    fig.update_layout(title=dict(text=title,x=.5,xanchor='center',font=dict(size=15)),height=height,
+                      margin=dict(l=15,r=15,t=45,b=15),showlegend=False,paper_bgcolor='rgba(0,0,0,0)')
+    return fig
+
+
+def practice_counts_figure(dimensions: list[dict[str,Any]]) -> Any:
+    labels=[f"D{d['id']}" for d in dimensions]
+    fig=go.Figure()
+    for field,label,color in [('yes','Avances declarados',STATUS_COLORS['yes']),('no','Ámbitos de mejora',STATUS_COLORS['no']),('unknown','Por confirmar',STATUS_COLORS['unknown'])]:
+        fig.add_trace(go.Bar(x=[d[field] for d in dimensions],y=labels,name=label,orientation='h',marker_color=color,
+                            text=[str(d[field]) if d[field] else '' for d in dimensions],textposition='inside',
+                            customdata=[d['title'] for d in dimensions],hovertemplate='%{customdata}<br>'+label+': %{x}<extra></extra>'))
+    fig.update_layout(title='Respuestas por dimensión',barmode='stack',height=330,margin=dict(l=15,r=20,t=50,b=60),
+                      xaxis=dict(title='Número de prácticas aplicables',dtick=1,fixedrange=True),
+                      yaxis=dict(autorange='reversed',fixedrange=True),
+                      legend=dict(orientation='h',yanchor='top',y=-.2,x=0),paper_bgcolor='rgba(0,0,0,0)')
+    return fig
+
+
 def dimension_figure(dimensions: list[dict[str,Any]], title: str='') -> Any:
     values=[d['score'] for d in dimensions]
     fig=go.Figure(go.Bar(x=values,y=[f"D{d['id']}. {d['title']}" for d in dimensions],orientation='h',
@@ -1667,7 +1725,7 @@ def render_plan(record: Mapping[str,Any], result: dict[str,Any]) -> None:
         rows=plan_stage_rows(result)
         if rows:st.dataframe(pd.DataFrame(rows),hide_index=True,width='stretch')
         if plan['other_tool']:
-            for item in plan['actions']:st.write(item)
+            for item in plan['actions']:st.warning(item)
         st.caption('Solo se reconocen las etapas seleccionadas. Declarar implementación no supone aprobación, redacción o comunicación. Estas etapas no suman puntos al índice.')
     f=RecordFields(record)
     if normalize_response(f.get('weps_30'))=='si':
@@ -1697,13 +1755,25 @@ def render_result(entry: dict[str,Any], key: str='company') -> None:
     st.caption('La puntuación resume prácticas declaradas entre las respuestas conocidas; las prácticas no aplicables se excluyen. Se requiere evidencia para confirmar los avances.')
     if result['critical_pending']:st.warning(f"Hay {result['critical_pending']} medidas básicas de protección por verificar.")
     if result['differences']:st.warning('El recálculo encuentra diferencias con los resultados exportados por Kobo. Se muestra el cálculo reconstruido; la administración puede revisar el detalle.')
-    st.plotly_chart(dimension_figure(result['dimensions']),width='stretch',config=CHART_CONFIG,key=key+'_dims')
+    st.caption('Verde: avances declarados. Ámbar: ámbitos de mejora. Azul: información por confirmar.')
+    general,comparison=st.columns([1,2])
+    with general:
+        st.plotly_chart(score_figure(result['score'],'Índice general ponderado',height=330),width='stretch',config=CHART_CONFIG,key=key+'_general_donut')
+    with comparison:
+        st.plotly_chart(dimension_figure(result['dimensions']),width='stretch',config=CHART_CONFIG,key=key+'_dims')
+    st.plotly_chart(practice_counts_figure(result['dimensions']),width='stretch',config=CHART_CONFIG,key=key+'_response_counts')
     render_plan(record,result)
     for d in result['dimensions']:
         with st.expander(f"{d['id']}. {d['title']}",expanded=True):
             if d['applicable']==0:
                 st.info('No aplica al perfil declarado de la empresa.');continue
             st.caption(f"Peso de la dimensión: {d['weight']:g} %. Prácticas declaradas: {percent(d['score'])}. Información disponible: {percent(d['coverage'])}.")
+            chart,counts=st.columns([1,2])
+            with chart:
+                st.plotly_chart(score_figure(d['score'],'Prácticas declaradas',height=210),width='stretch',config=CHART_CONFIG,key=f"{key}_donut_d{d['id']:02d}")
+            with counts:
+                st.markdown('**Respuestas de esta dimensión**')
+                metric_cards([('Avances declarados',d['yes']),('Ámbitos de mejora',d['no']),('Por confirmar',d['unknown'])])
             left,right=st.columns(2)
             with left:
                 st.markdown('**Lo que la empresa ya hace**')
@@ -1711,13 +1781,13 @@ def render_result(entry: dict[str,Any], key: str='company') -> None:
                     for item in d['advances']:st.success(item)
                 else:st.write('Las respuestas todavía no identifican prácticas existentes en esta categoría.')
             with right:
-                st.markdown('**Lo que falta y primera acción**')
+                st.markdown('**Ámbitos de mejora y primera acción**')
                 if d['actions']:
-                    for item in d['actions']:st.write(item)
+                    for item in d['actions']:st.warning(item)
                 else:st.write('No se declararon prácticas faltantes en esta categoría.')
                 if d['verify']:
                     st.markdown('**Por confirmar**')
-                    for item in d['verify']:st.write(item)
+                    for item in d['verify']:st.info(item)
             detail=[{'Pregunta':p['question'],'Respuesta':RESPONSE_LABELS[p['status']],
                      'WEP':str(p['wep'])+(' (vínculos: '+p['secondary']+')' if p['secondary'] else ''),
                      'Objetivo del plan':p['objective'],'Peso interno (%)':p['weight']} for p in result['practices'] if p['dim']==d['id']]
