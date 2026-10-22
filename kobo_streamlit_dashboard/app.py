@@ -33,7 +33,7 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-APP_VERSION = 'v23.6 · diagnóstico V18, perfil radar y tabla por provincia'
+APP_VERSION = 'v23.7 · diagnóstico V18, perfil radar y tabla por provincia'
 MODEL_VERSION = 'TV_SCREENING_20261021_V18_VMT'
 DASHBOARD_URL = 'https://dashboard-turismo-violeta.streamlit.app/'
 SCREENING_SPEC = {'dimensions': [{'id': 1, 'title': 'Gobernanza, compromiso institucional y liderazgo', 'weight': 15},
@@ -2241,20 +2241,6 @@ def render_public_summary(entries: list[dict[str,Any]], records_n: int) -> None:
         st.plotly_chart(route_figure(summary['routes']),width='stretch',config=CHART_CONFIG,key='public_routes')
     render_map(valid,'public_map')
     render_province_profile(valid,'public')
-    st.subheader('Avances y primeras prioridades')
-    table=aggregate_practices(valid)
-    known=[r for r in table if r['Sí']+r['No']]
-    positives=sorted(known,key=lambda r:(-r['Sí'],r['Indicador']))[:5]
-    gaps=sorted([r for r in table if r['No']],key=lambda r:(-r['No'],r['Indicador']))[:5]
-    a,b=st.columns(2)
-    with a:
-        st.markdown('**Lo que ya está en marcha**')
-        for r in positives:
-            if r['Sí']:st.write(f"{r['Sí']} empresas: {QUESTION_MESSAGES[r['Indicador']][0]}")
-    with b:
-        st.markdown('**Acciones iniciales más frecuentes**')
-        for r in gaps:st.write(f"{r['No']} empresas: {r['Acción inicial']}")
-    st.caption('Los vínculos con los siete WEPs se mantienen en la consulta individual. Las dimensiones 7 y 8 son transversales y no duplican puntuación.')
     render_resources('public')
 
 
