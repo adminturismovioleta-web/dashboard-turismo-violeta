@@ -1,21 +1,20 @@
 from __future__ import annotations
 
-"""Turismo Violeta, visualizador del screening V18.
-
-Archivo principal autónomo: streamlit run visualizador_turismo_violeta_v18.py
-Dependencias (las mismas del visualizador original):
-    streamlit>=1.50,<2 pandas>=2.2,<4
-    plotly>=5.24,<8 openpyxl>=3.1,<4
-Secrets existentes: KOBO_DATA_URL, KOBO_TOKEN, ADMIN_PASSWORD.
-KOBO_DATA_URL es opcional: la fuente predeterminada es la exportación TURISMO V18.
-La URL de la antigua exportación facilitada en esta revisión se migra a TURISMO.
-Otros opcionales: COMPANY_COLUMN, ACCESS_CODE_COLUMN, PROVINCE_COLUMN, KOBO_FORM_URL.
-No incluir credenciales en este archivo. ADMIN_PASSWORD no tiene valor por defecto.
-
-La lógica analítica usa la biblioteca estándar y puede importarse sin Streamlit.
-Los indicadores antiguos no se convierten al modelo V18. El cálculo se reconstruye
-desde las respuestas, se contrasta con sc_* y se muestra la calidad por separado.
-"""
+# Turismo Violeta, visualizador del screening V18.
+# Notas de mantenimiento (comentarios para que Streamlit no los muestre).
+# Archivo principal autónomo: streamlit run visualizador_turismo_violeta_v18.py
+# Dependencias (las mismas del visualizador original):
+#     streamlit>=1.50,<2 pandas>=2.2,<4
+#     plotly>=5.24,<8 openpyxl>=3.1,<4
+# Secrets existentes: KOBO_DATA_URL, KOBO_TOKEN, ADMIN_PASSWORD.
+# KOBO_DATA_URL es opcional: la fuente predeterminada es la exportación TURISMO V18.
+# La URL de la antigua exportación facilitada en esta revisión se migra a TURISMO.
+# Otros opcionales: COMPANY_COLUMN, ACCESS_CODE_COLUMN, PROVINCE_COLUMN, KOBO_FORM_URL.
+# No incluir credenciales en este archivo. ADMIN_PASSWORD no tiene valor por defecto.
+#
+# La lógica analítica usa la biblioteca estándar y puede importarse sin Streamlit.
+# Los indicadores antiguos no se convierten al modelo V18. El cálculo se reconstruye
+# desde las respuestas, se contrasta con sc_* y se muestra la calidad por separado.
 
 import csv
 import hashlib
@@ -33,7 +32,7 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-APP_VERSION = 'v23.7 · diagnóstico V18, perfil radar y tabla por provincia'
+APP_VERSION = 'v23.8 · diagnóstico V18, perfil radar y tabla por provincia'
 MODEL_VERSION = 'TV_SCREENING_20261021_V18_VMT'
 DASHBOARD_URL = 'https://dashboard-turismo-violeta.streamlit.app/'
 SCREENING_SPEC = {'dimensions': [{'id': 1, 'title': 'Gobernanza, compromiso institucional y liderazgo', 'weight': 15},
