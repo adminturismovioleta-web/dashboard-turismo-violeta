@@ -33,7 +33,7 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-APP_VERSION = 'v23.5 · diagnóstico V18 y consulta compacta'
+APP_VERSION = 'v23.6 · diagnóstico V18, perfil radar y tabla por provincia'
 MODEL_VERSION = 'TV_SCREENING_20261021_V18_VMT'
 DASHBOARD_URL = 'https://dashboard-turismo-violeta.streamlit.app/'
 SCREENING_SPEC = {'dimensions': [{'id': 1, 'title': 'Gobernanza, compromiso institucional y liderazgo', 'weight': 15},
@@ -1490,6 +1490,35 @@ def summarize(entries: list[dict[str,Any]]) -> dict[str,Any]:
             'discrepancies':sum(bool(e['result']['differences']) for e in valid)}
 
 
+DIMENSION_SHORT_LABELS = {
+    1:('Gobernanza y','liderazgo'), 2:('Cuidados y','bienestar'),
+    3:('Cadena de valor','y territorio'), 4:('Experiencias','turísticas seguras'),
+    5:('Prevención de violencia,','acoso y discriminación'), 6:('Igualdad','laboral'),
+}
+
+
+def profile_row(label: str, summary: dict[str,Any], total: bool=False) -> dict[str,Any]:
+    return {'label':label,'companies':summary['companies'],'dimensions':summary['dimensions'],
+            'score':summary['score'],'scores_n':summary['scores_n'],'total':total}
+
+
+def province_profiles(entries: list[dict[str,Any]]) -> list[dict[str,Any]]:
+    """Equal company means, including known zeroes; never mix parameter sets."""
+    summary=summarize(entries)
+    if not summary['evaluable'] or not summary['same_parameters']:return []
+    groups={}
+    for entry in summary['evaluable']:
+        groups.setdefault(province_label(entry['record']),[]).append(entry)
+    rows=[profile_row(name,summarize(group)) for name,group in sorted(groups.items())]
+    return rows+[profile_row('Promedio general',summary,total=True)]
+
+
+def profile_csv_rows(rows: list[dict[str,Any]], label_title: str='Provincia') -> list[dict[str,Any]]:
+    return [{label_title:r['label'],'Empresas':r['companies'],
+             **{f"D{d['id']}. {d['title']} (%)":d['score'] for d in r['dimensions']},
+             'Resultado general (%)':r['score']} for r in rows]
+
+
 def credentials_match(record: Mapping[str,Any], typed_code: str, override: str='') -> bool:
     f=RecordFields(record)
     # Codes preserve case, punctuation and spaces. No match against RUC, telephone,
@@ -1640,6 +1669,80 @@ def score_svg(score: float|None, title: str) -> str:
     return f'<figure class="tv-donut"><svg viewBox="0 0 120 120" width="190" height="190" role="img" aria-label="{esc(title)}: {esc(percent(score))}">{ring}{center}</svg><figcaption>{esc(title)}</figcaption></figure>'
 
 
+def radar_svg(dimensions: list[dict[str,Any]]) -> str:
+    """Self-contained radar for printing; missing values remain gaps."""
+    esc=lambda value:html.escape(text_value(value))
+    cx,cy,radius=380,235,150
+    def point(index,value):
+        angle=math.radians(-90+index*60)
+        return cx+radius*value/100*math.cos(angle),cy+radius*value/100*math.sin(angle)
+    def coordinates(points):return ' '.join(f'{x:.2f},{y:.2f}' for x,y in points)
+    parts=['<figure class="tv-radar"><svg viewBox="0 0 760 470" role="img" aria-label="Perfil de las seis dimensiones, escala de 0 a 100"><title>Perfil de las seis dimensiones</title><desc>Los espacios sin punto indican una dimensión sin resultado. La tabla muestra los valores exactos.</desc>']
+    for value in range(20,101,20):
+        parts.append(f'<polygon points="{coordinates([point(i,value) for i in range(6)])}" fill="none" stroke="#D8DDE5" stroke-dasharray="4 4"/>')
+        parts.append(f'<text x="372" y="{cy-radius*value/100+4:g}" text-anchor="end" font-size="11" fill="#62586D">{value}</text>')
+    for i,d in enumerate(dimensions):
+        x,y=point(i,100);lx,ly=point(i,132)
+        anchor='start' if lx>cx+1 else ('end' if lx<cx-1 else 'middle')
+        parts.append(f'<line x1="{cx}" y1="{cy}" x2="{x:.2f}" y2="{y:.2f}" stroke="#D8DDE5"/>')
+        first,second=DIMENSION_SHORT_LABELS[d['id']]
+        parts.append(f'<text x="{lx:.2f}" y="{ly-7:.2f}" text-anchor="{anchor}" font-size="14" fill="#253346"><tspan x="{lx:.2f}">D{d["id"]}. {esc(first)}</tspan><tspan x="{lx:.2f}" dy="18">{esc(second)}</tspan></text>')
+    complete=all(d['score'] is not None for d in dimensions)
+    if complete:
+        parts.append(f'<polygon points="{coordinates([point(i,d["score"]) for i,d in enumerate(dimensions)])}" fill="#16815A" fill-opacity="0.14" stroke="#16815A" stroke-width="3"/>')
+    else:
+        for i,d in enumerate(dimensions):
+            j=(i+1)%len(dimensions)
+            if d['score'] is not None and dimensions[j]['score'] is not None:
+                parts.append(f'<polyline points="{coordinates([point(i,d["score"]),point(j,dimensions[j]["score"])])}" fill="none" stroke="#16815A" stroke-width="3"/>')
+    for i,d in enumerate(dimensions):
+        if d['score'] is not None:
+            x,y=point(i,d['score'])
+            parts.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="5" fill="#16815A"><title>{esc(d["title"])}: {esc(percent(d["score"]))}</title></circle>')
+    if not any(d['score'] is not None for d in dimensions):
+        parts.append('<text x="380" y="240" text-anchor="middle" fill="#62586D" font-size="16">Sin información</text>')
+    return ''.join(parts)+'</svg><figcaption>Cuanto más lejos del centro, mayor es el avance en esa dimensión.</figcaption></figure>'
+
+
+PROFILE_CSS = '''
+.tv-profile-wrap{overflow-x:auto;margin:16px 0;border:1px solid #BDD2DC;border-radius:8px;background:#fff;color:#253346}
+.tv-profile-table{width:100%;min-width:960px;border-collapse:collapse;font:14px/1.4 sans-serif;margin:0}
+.tv-profile-table caption{text-align:left;font-weight:650;padding:13px 15px;color:#253346;background:#F5F9FB}
+.tv-profile-table th,.tv-profile-table td{border:1px solid #D3DEE3;padding:11px 9px;text-align:center;vertical-align:middle;color:#253346}
+.tv-profile-table thead th{background:#D5EAF3;color:#164B62;font-weight:700}
+.tv-profile-table thead th span{display:block;font-size:12px;line-height:1.4;font-weight:500;margin-top:4px}
+.tv-profile-table tbody th{text-align:left;background:#F5F9FB;min-width:155px;overflow-wrap:anywhere}
+.tv-profile-table .tv-profile-total th,.tv-profile-table .tv-profile-total td{font-weight:750;border-top:3px solid #7DA7B9}
+.tv-profile-table .tv-profile-general{border-left:3px solid #7DA7B9;font-weight:700}
+.tv-profile-key{font:13px/1.6 sans-serif;color:#62586D;margin:10px 0 18px}
+.tv-profile-key span{display:inline-block;padding:3px 9px;margin:0 4px 5px 0;border-radius:4px;color:#253346}
+.tv-radar{max-width:760px;margin:16px auto;text-align:center;font:13px/1.5 sans-serif;color:#62586D;break-inside:avoid}.tv-radar svg{width:100%;height:auto}
+@media print{.tv-profile-wrap{overflow:visible}.tv-profile-table{min-width:0;font-size:10px}.tv-profile-table th,.tv-profile-table td{padding:6px}.tv-profile-table tbody th{min-width:0}.tv-radar{max-width:650px}}
+'''
+
+
+def profile_color(score: float|None) -> str:
+    if score is None:return '#E9EDF2'
+    anchors=[(0,(247,194,127)),(50,(255,238,166)),(100,(151,209,167))]
+    left,right=anchors[:2] if score<=50 else anchors[1:]
+    t=max(0,min(1,(score-left[0])/(right[0]-left[0])))
+    return '#'+''.join(f'{round(a+(b-a)*t):02X}' for a,b in zip(left[1],right[1]))
+
+
+def score_matrix_html(rows: list[dict[str,Any]], label_title: str='Provincia', title: str='Resultados por provincia y dimensión') -> str:
+    esc=lambda value:html.escape(text_value(value))
+    headings=''.join(f'<th scope="col" title="{esc(d["title"])}">D{d["id"]}<span>{esc(" ".join(DIMENSION_SHORT_LABELS[d["id"]]))}</span></th>' for d in DIMENSIONS)
+    body=[]
+    def cell(value,n,general=False):
+        content=esc(percent(value)) if value is not None else 'Sin dato'
+        return '<td'+(' class="tv-profile-general"' if general else '')+' style="background:'+profile_color(value)+'" title="'+str(n)+' empresas con resultado">'+content+'</td>'
+    for row in rows:
+        cells=''.join(cell(d['score'],d.get('companies',row['companies'])) for d in row['dimensions'])
+        body.append('<tr'+(' class="tv-profile-total"' if row.get('total') else '')+'><th scope="row">'+esc(row['label'])+'</th><td>'+str(row['companies'])+'</td>'+cells+cell(row['score'],row['scores_n'],True)+'</tr>')
+    legend='<div class="tv-profile-key"><span style="background:#F7C27F">0 % · Menor avance</span><span style="background:#FFEEA6">50 %</span><span style="background:#97D1A7">100 % · Mayor avance</span><span style="background:#E9EDF2">Sin dato</span><br>'+' · '.join(f'D{d["id"]}: {esc(d["title"])}' for d in DIMENSIONS)+'</div>'
+    return '<div class="tv-profile-wrap"><table class="tv-profile-table"><caption>'+esc(title)+'</caption><thead><tr><th scope="col">'+esc(label_title)+'</th><th scope="col">Empresas</th>'+headings+'<th scope="col" class="tv-profile-general">Resultado general</th></tr></thead><tbody>'+''.join(body)+'</tbody></table></div>'+legend
+
+
 QUESTIONS_TABLE_CSS = '''
 .tv-questions-wrap{border:1px solid #DDD6E5;border-radius:10px;overflow:hidden;margin:14px 0 22px;background:#FFFFFF;color:#253346}
 .tv-questions-table{width:100%;table-layout:fixed;border-collapse:collapse;margin:0;font-size:14px;line-height:1.55}
@@ -1701,6 +1804,7 @@ def html_report(name: str, result: dict[str,Any], record: Mapping[str,Any]) -> b
     detail=text_value(RecordFields(record).get('tv_comunicacion_igualdad_detalle')).strip() if normalize_response(RecordFields(record).get('weps_30'))=='si' else ''
     if detail:plan_block+='<h2>Documentos mencionados en la encuesta</h2><p>'+esc(quote_survey(detail))+'</p>'
     overview=score_svg(result['score'],'Resultado general')
+    profile=radar_svg(result['dimensions'])+score_matrix_html([profile_row(name,summarize([{'result':result}]))],label_title='Empresa',title='Resultados de las seis dimensiones')
     reading=diagnostic_reading(result)
     for d in result['dimensions']:
         value=d['score']
@@ -1708,12 +1812,13 @@ def html_report(name: str, result: dict[str,Any], record: Mapping[str,Any]) -> b
         overview+=f'<div class="tv-score-row"><span>D{d["id"]}. {esc(d["title"])}</span>{bars}<strong>{esc(percent(value))}</strong></div>'
     content=f'''<!doctype html><html lang="es"><meta charset="utf-8"><title>Diagnóstico Turismo Violeta</title>
 <style>body{{font:15px Georgia,serif;color:#253346;max-width:1100px;margin:35px auto;padding:0 20px}}h1,h2{{color:#542778}}table{{border-collapse:collapse;width:100%;margin:20px 0}}th,td{{border:1px solid #ddd;padding:9px;vertical-align:top;text-align:left}}th{{background:#f2eaf7}}.advance{{background:#E8F7EE;color:#145A40}}.improvement{{background:#FFF4DF;color:#854D0E}}.verify{{background:#EAF2FF;color:#1E40AF}}p.advance,p.improvement,p.verify{{padding:13px 16px;border-radius:8px}}p.improvement{{border-left:4px solid #D97706}}.neutral{{color:#64748B}}.tv-donut{{margin:12px 0;text-align:center;width:220px}}.tv-donut figcaption{{font-weight:bold}}.tv-score-row{{display:grid;grid-template-columns:minmax(240px,1.5fr) 1fr 115px;gap:16px;align-items:center;margin:16px 0}}.tv-track{{height:14px;border-radius:7px;background:#F1F3F6;overflow:hidden}}.tv-track div{{height:100%;background:#16815A}}.tv-track.unavailable{{background:#D8DDE5}}.tv-reading{{background:#FAF7FD;border-left:5px solid #75449B;padding:18px 22px;border-radius:10px;line-height:1.65;margin:20px 0}}.tv-question{{border:1px solid #E8DDF1;padding:16px 20px;margin:18px 0;border-radius:10px;break-inside:avoid}}.tv-question h3{{font-size:16px;line-height:1.55}}.tv-question-comment{{background:#FAFAFC;color:#253346;border-left:3px solid #C6B0D9;padding:14px 18px;margin:16px 0;line-height:1.6}}.tv-question-comment p{{margin:8px 0 0}}@media print{{body{{print-color-adjust:exact;-webkit-print-color-adjust:exact}}table{{font-size:10px}}h2{{break-after:avoid}}tr{{break-inside:avoid}}details table{{display:table}}}}@media(max-width:650px){{.tv-score-row{{grid-template-columns:1fr;gap:5px}}}}</style>
-<style>{QUESTIONS_TABLE_CSS}</style>
+<style>{QUESTIONS_TABLE_CSS}{PROFILE_CSS}</style>
 <h1>Turismo Violeta: diagnóstico inicial</h1><h2>{esc(name)}</h2><p>Fecha: {esc(date_display(record))}. Modelo: {MODEL_VERSION}.</p>
 <p>Avance inicial: <b>{percent(result['score'])}</b>. Información respondida: <b>{percent(result['coverage'])}</b>.</p>
 <div class="tv-reading"><h2>Lectura del diagnóstico</h2><p>{esc(reading['summary'])}</p><p><strong>{esc(reading['title'])}</strong></p><p>{esc(reading['action'])}</p><p>{esc(reading['information'])}</p></div>
 <p>Verde: lo que ya está en marcha. Ámbar: lo que se puede mejorar. Azul: lo que falta confirmar.</p>
 <h2>Resultados del diagnóstico</h2>{overview}<p>Los resultados tienen en cuenta el peso de cada tema y las respuestas que se pudieron confirmar.</p>
+<h2>Perfil de las seis dimensiones</h2>{profile}<p>Cada dimensión se lee en una escala de 0 a 100. El resultado general aplica los pesos del modelo; los porcentajes de las dimensiones no se suman. Una dimensión sin dato queda en gris y sin punto en el gráfico.</p>
 {plan_block}{''.join(blocks)}<h2>Dimensiones transversales</h2><p>Comunicación y mejora continua reutilizan respuestas y no añaden puntos al índice.</p>
 <h2>Herramientas</h2>{links}<p><a href="{DASHBOARD_URL}">Consultar el dashboard</a></p></html>'''
     return content.encode('utf-8')
@@ -1849,7 +1954,7 @@ def public_css() -> None:
     .tv-answer.advance {background:#E8F7EE;color:#145A40}.tv-answer.improvement {background:#FFF4DF;color:#854D0E}
     .tv-answer.verify {background:#EAF2FF;color:#1E40AF}.tv-answer.neutral {background:#F1F3F6;color:#64748B}
     </style>''',unsafe_allow_html=True)
-    st.markdown('<style>'+QUESTIONS_TABLE_CSS+'</style>',unsafe_allow_html=True)
+    st.markdown('<style>'+QUESTIONS_TABLE_CSS+PROFILE_CSS+'</style>',unsafe_allow_html=True)
 
 
 def metric_cards(cards: list[tuple[str,Any]]) -> None:
@@ -1899,6 +2004,42 @@ def dimension_figure(dimensions: list[dict[str,Any]], title: str='') -> Any:
                       xaxis=dict(range=[0,105],title='Avance inicial (%)',fixedrange=True),
                       yaxis=dict(autorange='reversed',fixedrange=True,automargin=True),showlegend=False)
     return fig
+
+
+def radar_figure(dimensions: list[dict[str,Any]], title: str='Perfil de las seis dimensiones') -> Any:
+    values=[d['score'] for d in dimensions]
+    complete=all(value is not None for value in values)
+    labels=[f'D{d["id"]}. '+'<br>'.join(DIMENSION_SHORT_LABELS[d['id']]) for d in dimensions]
+    details=[[html.escape(d['title']),percent(d['score']),percent(d['coverage'])] for d in dimensions]
+    fig=go.Figure(go.Scatterpolar(r=values+values[:1],theta=[i*60 for i in range(len(dimensions)+1)],
+        customdata=details+details[:1],mode='lines+markers',connectgaps=False,
+        fill='toself' if complete else 'none',fillcolor='rgba(22,129,90,0.14)',
+        line=dict(color='#16815A',width=3),marker=dict(color='#16815A',size=8),
+        hovertemplate='%{customdata[0]}<br>Avance: %{customdata[1]}<br>Información respondida: %{customdata[2]}<extra></extra>'))
+    fig.update_layout(title=dict(text=html.escape(title),x=.5,xanchor='center',font=dict(size=17)),
+        height=520,margin=dict(l=105,r=105,t=90,b=70),showlegend=False,
+        paper_bgcolor='rgba(0,0,0,0)',font=dict(color='#253346',size=12),
+        polar=dict(bgcolor='rgba(0,0,0,0)',radialaxis=dict(range=[0,100],tickvals=[0,20,40,60,80,100],
+                    ticksuffix=' %',angle=90,gridcolor='#D8DDE5',linecolor='#D8DDE5',tickfont=dict(size=10)),
+                   angularaxis=dict(rotation=90,direction='clockwise',tickmode='array',tickvals=[i*60 for i in range(6)],
+                    ticktext=labels,gridcolor='#D8DDE5',linecolor='#D8DDE5')))
+    if not any(value is not None for value in values):
+        fig.add_annotation(text='Sin información',x=.5,y=.5,showarrow=False,bgcolor='white')
+    return fig
+
+
+def render_province_profile(entries: list[dict[str,Any]], key: str) -> None:
+    rows=province_profiles(entries)
+    if not rows:return
+    st.subheader('Perfil por provincia y dimensión')
+    options=['Todas las empresas']+[row['label'] for row in rows if not row['total']]
+    selected=st.selectbox('Provincia que se muestra en el gráfico',options,key=key+'_profile_province')
+    row=rows[-1] if selected==options[0] else next(r for r in rows[:-1] if r['label']==selected)
+    st.plotly_chart(radar_figure(row['dimensions'],selected+': perfil de dimensiones'),width='stretch',config=CHART_CONFIG,key=key+'_radar')
+    st.caption('La escala va de 0 a 100. Cuanto más lejos del centro, mayor es el avance. Una dimensión sin resultado queda sin punto; un resultado de 0 % sí se muestra en el centro.')
+    st.markdown(score_matrix_html(rows),unsafe_allow_html=True)
+    st.caption('Cada celda es el promedio de las empresas con resultado en ese tema. El promedio general se calcula sobre las empresas, por lo que cada provincia puede tener un número distinto de participantes. La última columna promedia el resultado ponderado de cada empresa. Los porcentajes de las dimensiones no se suman. Fuente: encuestas de Turismo Violeta, V18.')
+    st.download_button('Descargar tabla por provincia (CSV)',csv_bytes(profile_csv_rows(rows)),file_name='resultados_provincia_dimension_V18.csv',mime='text/csv',key=key+'_province_download')
 
 
 def route_figure(routes: dict[str,int]) -> Any:
@@ -1978,6 +2119,10 @@ def render_result(entry: dict[str,Any], key: str='company') -> None:
         st.plotly_chart(score_figure(result['score'],'Resultado general',height=330),width='stretch',config=CHART_CONFIG,key=key+'_general_donut')
     with comparison:
         st.plotly_chart(dimension_figure(result['dimensions']),width='stretch',config=CHART_CONFIG,key=key+'_dims')
+    st.subheader('Perfil de las seis dimensiones')
+    st.plotly_chart(radar_figure(result['dimensions']),width='stretch',config=CHART_CONFIG,key=key+'_radar')
+    st.markdown(score_matrix_html([profile_row(name,summarize([entry]))],label_title='Empresa',title='Resultados de las seis dimensiones'),unsafe_allow_html=True)
+    st.caption('La escala va de 0 a 100. Cuanto más lejos del centro, mayor es el avance. El resultado general aplica los pesos del modelo; los porcentajes de las dimensiones no se suman. Sin dato indica una dimensión sin respuestas evaluables o que no corresponde a la actividad. Fuente: encuesta de Turismo Violeta, V18.')
     st.plotly_chart(practice_counts_figure(result['dimensions']),width='stretch',config=CHART_CONFIG,key=key+'_response_counts')
     render_plan(record,result)
     for d in result['dimensions']:
@@ -2095,6 +2240,7 @@ def render_public_summary(entries: list[dict[str,Any]], records_n: int) -> None:
         st.markdown('**Siguiente paso recomendado**')
         st.plotly_chart(route_figure(summary['routes']),width='stretch',config=CHART_CONFIG,key='public_routes')
     render_map(valid,'public_map')
+    render_province_profile(valid,'public')
     st.subheader('Avances y primeras prioridades')
     table=aggregate_practices(valid)
     known=[r for r in table if r['Sí']+r['No']]
@@ -2183,15 +2329,14 @@ def render_admin_dashboard(entries: list[dict[str,Any]], records: list[dict[str,
         with a:st.plotly_chart(dimension_figure(summary['dimensions']),width='stretch',config=CHART_CONFIG,key='admin_dims')
         with b:st.plotly_chart(route_figure(summary['routes']),width='stretch',config=CHART_CONFIG,key='admin_route_chart')
         render_map(filtered,'admin_map')
+        render_province_profile(filtered,'admin')
     elif view=='Comparación y brechas':
         table=[company_summary_row(e) for e in filtered]
         st.dataframe(pd.DataFrame(table),hide_index=True,width='stretch')
         if summary['same_parameters']:
-            matrix=[[d['score'] for d in e['result']['dimensions']] for e in filtered]
-            fig=go.Figure(go.Heatmap(z=matrix,x=[f'D{i}' for i in range(1,7)],y=[e['company'] for e in filtered],
-                                    zmin=0,zmax=100,colorscale=[[0,'#F4EAF7'],[1,'#542778']],colorbar=dict(title='Prácticas (%)'),hoverongaps=False))
-            fig.update_layout(height=max(350,min(900,len(filtered)*34+100)),yaxis=dict(autorange='reversed',automargin=True))
-            st.plotly_chart(fig,width='stretch',config=CHART_CONFIG,key='admin_heatmap')
+            profiles=[profile_row(e['company'],summarize([e])) for e in filtered]+[profile_row('Promedio general',summary,total=True)]
+            st.markdown(score_matrix_html(profiles,label_title='Empresa',title='Comparación de avances por empresa'),unsafe_allow_html=True)
+            st.caption('La última fila promedia las empresas con resultado. Cada dimensión se lee por separado; la última columna usa el resultado ponderado del modelo. El gris indica que falta información.')
         practices=aggregate_practices(filtered)
         st.markdown('**Avances, mejoras y primeros pasos por pregunta**')
         st.dataframe(pd.DataFrame(practices),hide_index=True,width='stretch')
