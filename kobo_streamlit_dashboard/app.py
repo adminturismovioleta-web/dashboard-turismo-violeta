@@ -33,7 +33,7 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-APP_VERSION = 'v23.1 · diagnóstico inicial V18 con gráficos'
+APP_VERSION = 'v23.2 · diagnóstico V18 y lectura por pregunta'
 MODEL_VERSION = 'TV_SCREENING_20261021_V18_VMT'
 DASHBOARD_URL = 'https://dashboard-turismo-violeta.streamlit.app/'
 SCREENING_SPEC = {'dimensions': [{'id': 1, 'title': 'Gobernanza, compromiso institucional y liderazgo', 'weight': 15},
@@ -1033,6 +1033,46 @@ ROUTE_COLORS = {'proteccion_prioritaria':'#C2414A','completar_informacion':'#A16
                 'continuar_diagnostico':'#16815A','continuar_acompanamiento':'#75449B','no_evaluable':'#64748B'}
 CHART_CONFIG = {'displayModeBar':False,'staticPlot':True,'scrollZoom':False,'responsive':True}
 STATUS_COLORS = {'yes':'#16815A','no':'#D97706','unknown':'#3B82F6','empty':'#D8DDE5'}
+PLAN_DESCRIPTIONS = {
+    'redactado': ('El plan está escrito', 'Existe un documento con objetivos, acciones y responsables para trabajar la igualdad de género.', 'el plan está escrito', 'si el plan está por escrito', 'Confirmar si existe el documento del plan y, si falta, prepararlo.'),
+    'aprobado': ('El plan tiene aprobación interna', 'La dirección o la instancia responsable ha aprobado el plan para su aplicación.', 'el plan tiene aprobación interna', 'si el plan tiene aprobación interna', 'Confirmar la aprobación del plan y, si falta, gestionarla con la instancia responsable.'),
+    'implementado': ('Las acciones del plan están en ejecución', 'La empresa está llevando a la práctica las acciones que contempla su Plan de Igualdad.', 'se están ejecutando las acciones del Plan de Igualdad', 'si las acciones del plan se están ejecutando', 'Confirmar qué acciones están en marcha y definir el inicio de las que siguen pendientes.'),
+    'comunicado': ('El plan se ha dado a conocer', 'El personal y las personas que deben aplicar el plan conocen su contenido y sus responsabilidades.', 'el plan se ha dado a conocer a quienes deben aplicarlo', 'si el plan se ha comunicado a quienes deben aplicarlo', 'Confirmar a quiénes se ha comunicado el plan y completar la comunicación que haga falta.'),
+}
+QUESTION_PURPOSES = {
+    'weps_31': 'Contar con una herramienta de planificación ayuda a convertir la intención de trabajar por la igualdad en objetivos, acciones y responsables concretos.',
+    'weps_06': 'Una instancia responsable o punto focal permite dar continuidad a las acciones de igualdad y conocer quién debe coordinar su aplicación.',
+    'weps_05': 'Las medidas de participación de mujeres ayudan a revisar barreras de acceso a la dirección, la administración y las áreas donde predominan los hombres.',
+    'weps_28': 'La revisión periódica del plan permite reconocer lo que funcionó y ajustar las acciones que necesitan mejorar.',
+    'weps_30': 'Comunicar avances con documentos de respaldo permite mostrar qué acciones se han realizado y compartir sus resultados de forma clara.',
+    'weps_33': 'Conocer las necesidades de cuidado del personal permite organizar apoyos que respondan a su situación familiar y a sus responsabilidades.',
+    'weps_07': 'Esta pregunta reúne derechos y permisos de cuidado, apoyos necesarios y condiciones de lactancia que correspondan a la organización. Conviene revisar cada componente para identificar cuál requiere atención.',
+    'weps_08': 'La organización de horarios, permisos y turnos puede facilitar que el personal compatibilice su trabajo con las responsabilidades de cuidado.',
+    'weps_35': 'Registrar las medidas de cuidado solicitadas y aplicadas permite conocer qué apoyos se utilizan y si atienden las necesidades de mujeres y hombres.',
+    'tv_cuidados_comunicacion': 'Comunicar las medidas de cuidado permite que el personal conozca los apoyos disponibles y la forma de solicitarlos.',
+    'weps_38': 'Revisar accesibilidad y apoyos de cuidado ayuda a que más personas puedan participar en los servicios y actividades turísticas.',
+    'weps_39': 'Facilitar la participación de negocios liderados por mujeres y de proveedores comunitarios y locales amplía sus oportunidades dentro de la cadena de valor.',
+    'weps_24': 'Incorporar compromisos de igualdad y prevención de violencia en la relación con proveedores permite establecer expectativas claras desde su selección.',
+    'tv_proveedores_respuesta_vbg': 'Definir cómo responder a incidentes en la relación con proveedores permite identificar responsables y activar las medidas de atención que correspondan.',
+    'weps_21': 'Fortalecer las capacidades de los grupos de mujeres proveedoras puede ayudarles a sostener su participación en la cadena de valor.',
+    'weps_26': 'Las condiciones claras de remuneración y pago permiten reconocer los aportes de las mujeres y revisar el cumplimiento de los acuerdos con proveedores y comunidades.',
+    'weps_27': 'Acordar la difusión de saberes y el uso de conocimientos e imágenes permite que las mujeres involucradas participen en las decisiones sobre su patrimonio cultural.',
+    'weps_36': 'Reconocer los riesgos de las actividades turísticas permite preparar medidas preventivas y una respuesta ante situaciones que afecten la seguridad de las personas.',
+    'weps_37': 'Dar a conocer las normas de convivencia y los canales de ayuda, junto con la capacitación del personal de contacto, permite orientar a turistas y responder ante situaciones que afecten su seguridad.',
+    'weps_22': 'Revisar la comunicación y la promoción ayuda a identificar contenidos que reproduzcan estereotipos o discriminación y a corregirlos.',
+    'weps_09': 'Una declaración de cero tolerancia establece el compromiso de la organización frente a la violencia, el acoso y la discriminación. Su aplicación requiere que ese compromiso sea conocido.',
+    'weps_12': 'Un procedimiento escrito permite saber cómo prevenir la violencia y cómo actuar cuando se comunica una situación de acoso o discriminación.',
+    'weps_15': 'Los canales accesibles y confidenciales facilitan que las personas comuniquen una situación y conozcan las opciones de atención y derivación.',
+    'weps_16': 'Conocer las rutas de protección permite definir cómo actuar ante una sospecha de trata de personas o explotación sexual de niñas, niños y adolescentes.',
+    'weps_17': 'La capacitación del personal y de quienes reciben reportes ayuda a aplicar los procedimientos y cuidar la confidencialidad y el trato a las personas afectadas.',
+    'weps_23': 'Organizar la respuesta a incidentes ayuda a definir responsabilidades y a conectar la atención con las medidas de protección de la organización.',
+    'weps_01': 'Los criterios de selección y contratación permiten revisar que las oportunidades de empleo se ofrezcan sin sesgos o discriminación de género.',
+    'weps_02': 'Los criterios transparentes de promoción y desarrollo profesional permiten revisar cómo se distribuyen las oportunidades entre mujeres y hombres.',
+    'weps_03': 'La igualdad de acceso a la formación ayuda a que el personal fortalezca sus capacidades y amplíe sus posibilidades de desarrollo profesional.',
+    'weps_04': 'La revisión de remuneraciones permite identificar diferencias entre mujeres y hombres que realizan trabajos iguales o de igual valor. Esta respuesta no determina el tamaño de una brecha salarial.',
+    'weps_18': 'La formación en igualdad de género permite traducir los compromisos del plan en prácticas de trabajo y responsabilidades compartidas.',
+    'tv_riesgos_laborales_genero': 'Revisar los riesgos laborales con perspectiva de género permite adecuar la prevención a las tareas, los equipos y las necesidades del personal.',
+}
 RESPONSE_LABELS = {'si':'Sí','no':'No','ns':'No sabe / por verificar','sin_respuesta':'Sin respuesta',
                    'invalida':'Por verificar (valor no reconocido)','no_aplica':'No aplica','aplicabilidad_pendiente':'Perfil por confirmar'}
 
@@ -1449,11 +1489,92 @@ def percent(value: float|None) -> str:
     return 'Sin información' if value is None else f'{value:.1f}'.replace('.',',')+' %'
 
 
+def join_words(items: Iterable[str]) -> str:
+    values=list(items)
+    return values[0] if len(values)==1 else (', '.join(values[:-1])+' y '+values[-1] if values else '')
+
+
+def diagnostic_reading(result: dict[str,Any]) -> dict[str,str]:
+    totals=result['totals']
+    summary=f"De {totals['aplicables']} prácticas aplicables a la empresa, se declararon {totals['si']} existentes y {totals['no']} pendientes de implementar."
+    if totals['por_verificar']:summary+=f" Además, hay {totals['por_verificar']} respuestas por confirmar."
+    if result['score'] is not None:summary+=' Al considerar el peso de cada práctica y dimensión, el resultado es '+percent(result['score'])+'.'
+    names={'weps_09':'la política de cero tolerancia frente a la violencia y la discriminación',
+           'weps_12':'el procedimiento para prevenir y atender situaciones de violencia o acoso',
+           'weps_15':'los canales confidenciales de reporte y las opciones de atención',
+           'weps_16':'la activación de las rutas de protección frente a trata y explotación sexual'}
+    missing=[names[p['name']] for p in result['practices'] if p['critical'] and p['applies'] is True and p['response']=='no']
+    route=result['route']
+    if route=='proteccion_prioritaria':
+        title='Por dónde empezar: reforzar las medidas básicas de protección'
+        action='Se respondió No sobre '+join_words(missing)+'. Estas medidas deben atenderse entre las primeras acciones del Plan de Igualdad, con apoyo para definir responsables y formas de actuación.'
+    elif route=='completar_informacion':
+        title='Por dónde empezar: completar la información pendiente'
+        action='Conviene confirmar las respuestas pendientes antes de decidir el siguiente paso del diagnóstico.'
+        if result['plan']['pending']:action+=' En particular, hace falta aclarar la situación del Plan de Igualdad, que se explica más abajo.'
+    elif route=='continuar_diagnostico':
+        title='Siguiente paso: profundizar el diagnóstico'
+        action='Las respuestas permiten continuar a una revisión más detallada. El siguiente paso es comprobar los avances con sus respaldos y precisar los compromisos de mejora.'
+    else:
+        title='Por dónde empezar: organizar las primeras mejoras'
+        action='Conviene elegir una o dos de las mejoras identificadas y definir quién las realizará, qué apoyo se necesita y cuándo se revisará su avance.'
+    if result['coverage'] is not None and math.isclose(result['coverage'],100):
+        information='El 100 % de información respondida significa que las preguntas aplicables tienen respuesta. El avance de las prácticas se expresa en el resultado ponderado.'
+    else:
+        information='La información respondida muestra cuánto se conoce de las prácticas aplicables. Las respuestas pendientes no se interpretan como un No.'
+    return {'summary':summary,'title':title,'action':action,'information':information}
+
+
+def plan_presentation(result: dict[str,Any]) -> dict[str,Any]:
+    plan=result['plan']
+    intro='Esta sección explica cómo se encuentra el Plan de Igualdad: si está por escrito, si tiene aprobación interna, si sus acciones se están ejecutando y si se ha dado a conocer.'
+    if not plan['active']:
+        response=next(p['response'] for p in result['practices'] if p['name']=='weps_31')
+        summary=('Se indicó que la empresa todavía no cuenta con un Plan de Igualdad ni con otra herramienta de planificación para la igualdad. La primera acción es definir objetivos, acciones y responsables.' if response=='no' else 'Todavía falta confirmar si la empresa cuenta con un Plan de Igualdad u otra herramienta para organizar sus acciones de igualdad.')
+        return {'intro':intro,'summary':summary,'aspects':[],'pending':True}
+    if plan['other_tool']:
+        return {'intro':'La empresa indicó que utiliza otra herramienta para organizar sus acciones de igualdad de género.',
+                'summary':'Conviene revisar que esa herramienta identifique los objetivos de igualdad, las acciones previstas y las personas responsables de llevarlas a cabo.',
+                'aspects':[],'pending':bool(plan['pending'])}
+    selected=[PLAN_DESCRIPTIONS[code][2] for code,_,_ in PLAN_STAGES if code in plan['confirmed']]
+    pending=[PLAN_DESCRIPTIONS[code][3] for code,_,_ in PLAN_STAGES if code not in plan['confirmed']]
+    summary=('En el formulario se indicó que '+join_words(selected)+'.') if selected else 'No se seleccionó información sobre estos cuatro aspectos del plan.'
+    if pending:summary+=' Queda por confirmar '+join_words(pending)+'.'
+    if plan['invalid']:summary+=' La selección contiene datos contradictorios o no reconocidos y necesita revisarse.'
+    aspects=[{'code':code,'title':PLAN_DESCRIPTIONS[code][0],'meaning':PLAN_DESCRIPTIONS[code][1],
+              'selected':code in plan['confirmed'],'next_action':PLAN_DESCRIPTIONS[code][4] if code not in plan['confirmed'] else ''} for code,_,_ in PLAN_STAGES]
+    return {'intro':intro,'summary':summary,'aspects':aspects,'pending':bool(pending or plan['pending'])}
+
+
+def question_analysis(practice: dict[str,Any], dimension: dict[str,Any]) -> dict[str,Any]:
+    purpose=QUESTION_PURPOSES[practice['name']]
+    possible=None;points=None;gap=None
+    if practice['applies'] is not True:
+        comment='Esta pregunta no se incluye en el resultado porque no corresponde al perfil que declaró la empresa.' if practice['applies'] is False else 'Hace falta completar el perfil de la empresa para saber si esta pregunta corresponde a su actividad.'
+    elif practice['response'] in {'si','no'}:
+        possible=100*practice['weight']/dimension['known_weight'] if dimension['known_weight'] else None
+        points=(possible if practice['response']=='si' else 0.0) if possible is not None else None
+        gap=(0.0 if practice['response']=='si' else possible) if possible is not None else None
+        if practice['response']=='si':
+            comment=purpose+' La respuesta Sí reconoce una práctica que la empresa ya declara realizar. Conviene mantenerla y conservar un respaldo sencillo de su aplicación.'
+        else:
+            comment=purpose+' La respuesta No identifica un ámbito de mejora. Primera acción: '+practice['action']
+    else:
+        comment=purpose+' Hace falta confirmar si esta práctica existe para reconocer un avance o definir una mejora.'
+    return {'comment':comment,'possible_points':possible,'points':points,'gap_points':gap,
+            'response_label':RESPONSE_LABELS[practice['status']]}
+
+
 def plan_rows(result: dict[str,Any]) -> list[dict[str,Any]]:
     rows=[{'Dimensión':p['dimension'],'Pregunta':p['name'],'Práctica evaluada':p['question'],
              'Estado':RESPONSE_LABELS[p['status']],'Avance declarado':p['finding'],'Acción inicial':p['next_action'],
              'WEP principal':p['wep'],'WEP vinculados':p['secondary'],'Objetivo del plan':p['objective'],
              'Alcance de medición':p['limit']} for p in result['practices']]
+    dimensions={d['id']:d for d in result['dimensions']}
+    for row,practice in zip(rows,result['practices']):
+        view=question_analysis(practice,dimensions[practice['dim']])
+        row.update({'Comentario sobre la respuesta':view['comment'],'Aporte a la dimensión (puntos)':view['points'],
+                    'Mejora posible en la dimensión (puntos)':view['gap_points']})
     plan=result['plan']
     if plan['active']:
         if plan['other_tool']:
@@ -1483,6 +1604,21 @@ def score_svg(score: float|None, title: str) -> str:
     return f'<figure class="tv-donut"><svg viewBox="0 0 120 120" width="190" height="190" role="img" aria-label="{esc(title)}: {esc(percent(score))}">{ring}{center}</svg><figcaption>{esc(title)}</figcaption></figure>'
 
 
+def question_report_block(practice: dict[str,Any], dimension: dict[str,Any], position: int) -> str:
+    esc=lambda value:html.escape(text_value(value))
+    view=question_analysis(practice,dimension)
+    color='advance' if practice['status']=='si' else ('improvement' if practice['status']=='no' else ('neutral' if practice['status']=='no_aplica' else 'verify'))
+    if view['possible_points'] is None:
+        chart='<p class="'+color+'">'+esc(view['response_label'])+'. Esta pregunta no tiene un aporte calculable por el momento.</p>'
+    else:
+        yes=practice['response']=='si'
+        value=view['points'] if yes else view['gap_points']
+        label='Aporte declarado en esta dimensión' if yes else 'Mejora posible en esta dimensión'
+        chart='<p><strong>'+label+': '+f'{value:.1f}'.replace('.',',')+' puntos.</strong></p>'
+        chart+=f'<div class="tv-track"><div style="width:{value:g}%;background:{STATUS_COLORS["yes" if yes else "no"]}"></div></div>'
+    return '<article class="tv-question"><h3>Pregunta '+str(position)+'. '+esc(practice['question'])+'</h3><p class="'+color+'"><strong>Respuesta: '+esc(view['response_label'])+'</strong></p>'+chart+'<div class="tv-question-comment"><strong>Comentario sobre esta respuesta</strong><p>'+esc(view['comment'])+'</p></div></article>'
+
+
 def html_report(name: str, result: dict[str,Any], record: Mapping[str,Any]) -> bytes:
     esc=lambda x:html.escape(text_value(x))
     blocks=[]
@@ -1496,27 +1632,29 @@ def html_report(name: str, result: dict[str,Any], record: Mapping[str,Any]) -> b
         observations=''.join('<p class="advance">'+esc(item)+'</p>' for item in d['advances'])
         observations+=''.join('<p class="improvement"><strong>Ámbito de mejora:</strong> '+esc(item)+'</p>' for item in d['actions'])
         observations+=''.join('<p class="verify"><strong>Por confirmar:</strong> '+esc(item)+'</p>' for item in d['verify'])
-        blocks.append(f"<h2>{d['id']}. {esc(d['title'])}</h2><p>Prácticas declaradas: {percent(d['score'])}. Información disponible: {percent(d['coverage'])}.</p>{chart}{observations}<table><thead><tr><th>Práctica</th><th>Estado</th><th>Avance</th><th>Primera acción</th></tr></thead><tbody>{body}</tbody></table>")
+        questions=[p for p in result['practices'] if p['dim']==d['id']]
+        question_blocks=''.join(question_report_block(p,d,i) for i,p in enumerate(questions,1))
+        blocks.append(f"<h2>{d['id']}. {esc(d['title'])}</h2><p>Prácticas declaradas: {percent(d['score'])}. Información disponible: {percent(d['coverage'])}.</p>{chart}{observations}<h3>Resultado de cada pregunta</h3>{question_blocks}<details><summary>Ver tabla de preguntas</summary><table><thead><tr><th>Práctica</th><th>Estado</th><th>Avance</th><th>Primera acción</th></tr></thead><tbody>{body}</tbody></table></details>")
     links=''.join(f'<p><a href="{esc(r[1])}">{esc(r[0])}</a></p>' for r in SCREENING_SPEC['resources'])
-    plan=result['plan']
-    plan_block=''
-    if plan['active']:
-        advances=''.join('<p class="advance">'+esc(item)+'</p>' for item in plan['advances'])
-        actions=''.join('<p class="'+('improvement' if plan['other_tool'] else 'verify')+'">'+esc(item)+'</p>' for item in plan['actions'])
-        plan_block='<h2>Planificación para la igualdad de género</h2><p>'+esc(plan['state_text'])+'</p>'+advances+'<h3>Primeras acciones</h3>'+actions+'<p>Las etapas se presentan por separado y no añaden puntos al índice.</p>'
+    presentation=plan_presentation(result)
+    plan_block='<h2>Situación del Plan de Igualdad</h2><p>'+esc(presentation['intro'])+'</p><p class="verify">'+esc(presentation['summary'])+'</p>'
+    for aspect in presentation['aspects']:
+        status='Se seleccionó esta opción en el formulario.' if aspect['selected'] else 'No se seleccionó esta opción. Hace falta confirmar su situación.'
+        next_action='<p><strong>Siguiente paso:</strong> '+esc(aspect['next_action'])+'</p>' if aspect['next_action'] else ''
+        plan_block+='<article class="tv-question"><h3>'+esc(aspect['title'])+'</h3><p>'+esc(aspect['meaning'])+'</p><p class="'+('advance' if aspect['selected'] else 'verify')+'">'+esc(status)+'</p>'+next_action+'</article>'
     detail=text_value(RecordFields(record).get('tv_comunicacion_igualdad_detalle')).strip() if normalize_response(RecordFields(record).get('weps_30'))=='si' else ''
     if detail:plan_block+='<h2>Documentos de comunicación declarados</h2><p>'+esc(detail)+'</p>'
     overview=score_svg(result['score'],'Índice general ponderado')
+    reading=diagnostic_reading(result)
     for d in result['dimensions']:
         value=d['score']
         bars=(f'<div class="tv-track"><div style="width:{value:g}%"></div></div>' if value is not None else '<div class="tv-track unavailable"></div>')
         overview+=f'<div class="tv-score-row"><span>D{d["id"]}. {esc(d["title"])}</span>{bars}<strong>{esc(percent(value))}</strong></div>'
     content=f'''<!doctype html><html lang="es"><meta charset="utf-8"><title>Diagnóstico Turismo Violeta</title>
-<style>body{{font:15px Georgia,serif;color:#253346;max-width:1100px;margin:35px auto;padding:0 20px}}h1,h2{{color:#542778}}table{{border-collapse:collapse;width:100%;margin:20px 0}}th,td{{border:1px solid #ddd;padding:9px;vertical-align:top;text-align:left}}th{{background:#f2eaf7}}.advance{{background:#E8F7EE;color:#145A40}}.improvement{{background:#FFF4DF;color:#854D0E}}.verify{{background:#EAF2FF;color:#1E40AF}}p.advance,p.improvement,p.verify{{padding:13px 16px;border-radius:8px}}p.improvement{{border-left:4px solid #D97706}}.neutral{{color:#64748B}}.tv-donut{{margin:12px 0;text-align:center;width:220px}}.tv-donut figcaption{{font-weight:bold}}.tv-score-row{{display:grid;grid-template-columns:minmax(240px,1.5fr) 1fr 115px;gap:16px;align-items:center;margin:16px 0}}.tv-track{{height:14px;border-radius:7px;background:#FFF4DF;overflow:hidden}}.tv-track div{{height:100%;background:#16815A}}.tv-track.unavailable{{background:#D8DDE5}}@media print{{body{{print-color-adjust:exact;-webkit-print-color-adjust:exact}}table{{font-size:10px}}h2{{break-after:avoid}}tr{{break-inside:avoid}}}}@media(max-width:650px){{.tv-score-row{{grid-template-columns:1fr;gap:5px}}}}</style>
+<style>body{{font:15px Georgia,serif;color:#253346;max-width:1100px;margin:35px auto;padding:0 20px}}h1,h2{{color:#542778}}table{{border-collapse:collapse;width:100%;margin:20px 0}}th,td{{border:1px solid #ddd;padding:9px;vertical-align:top;text-align:left}}th{{background:#f2eaf7}}.advance{{background:#E8F7EE;color:#145A40}}.improvement{{background:#FFF4DF;color:#854D0E}}.verify{{background:#EAF2FF;color:#1E40AF}}p.advance,p.improvement,p.verify{{padding:13px 16px;border-radius:8px}}p.improvement{{border-left:4px solid #D97706}}.neutral{{color:#64748B}}.tv-donut{{margin:12px 0;text-align:center;width:220px}}.tv-donut figcaption{{font-weight:bold}}.tv-score-row{{display:grid;grid-template-columns:minmax(240px,1.5fr) 1fr 115px;gap:16px;align-items:center;margin:16px 0}}.tv-track{{height:14px;border-radius:7px;background:#F1F3F6;overflow:hidden}}.tv-track div{{height:100%;background:#16815A}}.tv-track.unavailable{{background:#D8DDE5}}.tv-reading{{background:#FAF7FD;border-left:5px solid #75449B;padding:18px 22px;border-radius:10px;line-height:1.65;margin:20px 0}}.tv-question{{border:1px solid #E8DDF1;padding:16px 20px;margin:18px 0;border-radius:10px;break-inside:avoid}}.tv-question h3{{font-size:16px;line-height:1.55}}.tv-question-comment{{background:#FAFAFC;color:#253346;border-left:3px solid #C6B0D9;padding:14px 18px;margin:16px 0;line-height:1.6}}.tv-question-comment p{{margin:8px 0 0}}@media print{{body{{print-color-adjust:exact;-webkit-print-color-adjust:exact}}table{{font-size:10px}}h2{{break-after:avoid}}tr{{break-inside:avoid}}details table{{display:table}}}}@media(max-width:650px){{.tv-score-row{{grid-template-columns:1fr;gap:5px}}}}</style>
 <h1>Turismo Violeta: diagnóstico inicial</h1><h2>{esc(name)}</h2><p>Fecha: {esc(date_display(record))}. Modelo: {MODEL_VERSION}.</p>
 <p>Índice de prácticas declaradas: <b>{percent(result['score'])}</b>. Información disponible: <b>{percent(result['coverage'])}</b>.</p>
-<p><b>{esc(result['route_label'])}.</b> {esc(result['route_text'])}</p>
-<p>Resultado {'provisional' if result['provisional'] else 'completo en información declarada'}. Orienta un Plan de Igualdad; requiere contraste con evidencia.</p>
+<div class="tv-reading"><h2>Lectura del diagnóstico</h2><p>{esc(reading['summary'])}</p><p><strong>{esc(reading['title'])}</strong></p><p>{esc(reading['action'])}</p><p>{esc(reading['information'])}</p></div>
 <p>Verde: avances declarados. Ámbar: ámbitos de mejora. Azul: información por confirmar.</p>
 <h2>Gráficos del diagnóstico</h2>{overview}<p>Los porcentajes corresponden a prácticas ponderadas con respuesta conocida. La información disponible se muestra por separado.</p>
 {plan_block}{''.join(blocks)}<h2>Dimensiones transversales</h2><p>Comunicación y mejora continua reutilizan respuestas y no añaden puntos al índice.</p>
@@ -1644,6 +1782,15 @@ def public_css() -> None:
     .tv-kpi-label {font-size:.85rem;color:#62586d}.tv-kpi-value {font-size:1.8rem;color:#542778;font-weight:750}
     div[role="radiogroup"] {gap:.25rem;border-bottom:1px solid #e7e7ec;padding-bottom:.3rem;margin-bottom:1rem}
     div[role="radiogroup"] label {padding:.4rem .7rem;border-radius:8px 8px 0 0}
+    .tv-reading {background:#FAF7FD;border:1px solid #E8DDF1;border-left:5px solid #75449B;border-radius:12px;padding:20px 24px;margin:18px 0 24px}
+    .tv-reading h3 {font-size:1.15rem;margin:0 0 12px;color:#542778}
+    .tv-reading p {margin:10px 0;line-height:1.65;color:#253346}
+    .tv-reading .tv-information {font-size:.9rem;color:#62586D}
+    .tv-question-comment {background:#FAFAFC;color:#253346;border-left:3px solid #C6B0D9;padding:14px 18px;margin:14px 0 16px;border-radius:0 8px 8px 0;line-height:1.6}
+    .tv-question-comment p {margin:8px 0 0}
+    .tv-answer {font-weight:650;padding:6px 12px;border-radius:6px;display:inline-block;margin-top:8px}
+    .tv-answer.advance {background:#E8F7EE;color:#145A40}.tv-answer.improvement {background:#FFF4DF;color:#854D0E}
+    .tv-answer.verify {background:#EAF2FF;color:#1E40AF}.tv-answer.neutral {background:#F1F3F6;color:#64748B}
     </style>''',unsafe_allow_html=True)
 
 
@@ -1682,6 +1829,39 @@ def practice_counts_figure(dimensions: list[dict[str,Any]]) -> Any:
     return fig
 
 
+def question_figure(practice: dict[str,Any], dimension: dict[str,Any]) -> Any:
+    view=question_analysis(practice,dimension)
+    fig=go.Figure()
+    if view['possible_points'] is None:
+        message='No aplica al perfil' if practice['applies'] is False else ('Respuesta por confirmar' if practice['response'] not in {'si','no'} else 'Sin puntaje calculable')
+        fig.add_annotation(text=message,x=.5,y=.5,xref='paper',yref='paper',showarrow=False,font=dict(color='#64748B',size=15))
+        fig.update_xaxes(visible=False);fig.update_yaxes(visible=False)
+        title='Situación de esta pregunta'
+    else:
+        yes=practice['response']=='si'
+        value=view['points'] if yes else view['gap_points']
+        label='Aporte declarado' if yes else 'Mejora posible'
+        fig.add_trace(go.Bar(x=[value],y=['Pregunta'],orientation='h',marker_color=STATUS_COLORS['yes'] if yes else STATUS_COLORS['no'],
+                            text=[f'{value:.1f}'.replace('.',',')+' puntos'],textposition='outside',cliponaxis=False,
+                            hovertemplate=label+': %{x:.1f} puntos<extra></extra>'))
+        title=label+' en esta dimensión'
+        fig.update_xaxes(range=[0,110],tickvals=[0,25,50,75,100],fixedrange=True,title=None)
+        fig.update_yaxes(visible=False,fixedrange=True)
+    fig.update_layout(title=dict(text=title,font=dict(size=14)),height=135,margin=dict(l=8,r=75,t=40,b=30),
+                      showlegend=False,paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(0,0,0,0)')
+    return fig
+
+
+def render_question(practice: dict[str,Any], dimension: dict[str,Any], position: int, key: str) -> None:
+    view=question_analysis(practice,dimension)
+    color='advance' if practice['status']=='si' else ('improvement' if practice['status']=='no' else ('neutral' if practice['status']=='no_aplica' else 'verify'))
+    with st.container(border=True):
+        st.markdown(f"**Pregunta {position}. {practice['question']}**")
+        st.markdown(f'<div class="tv-answer {color}">Respuesta: {html.escape(view["response_label"])}</div>',unsafe_allow_html=True)
+        st.plotly_chart(question_figure(practice,dimension),width='stretch',config=CHART_CONFIG,key=key+'_'+practice['name'])
+        st.markdown('<div class="tv-question-comment"><strong>Comentario sobre esta respuesta</strong><p>'+html.escape(view['comment'])+'</p></div>',unsafe_allow_html=True)
+
+
 def dimension_figure(dimensions: list[dict[str,Any]], title: str='') -> Any:
     values=[d['score'] for d in dimensions]
     fig=go.Figure(go.Bar(x=values,y=[f"D{d['id']}. {d['title']}" for d in dimensions],orientation='h',
@@ -1718,15 +1898,23 @@ def plan_stage_rows(result: dict[str,Any]) -> list[dict[str,Any]]:
 
 
 def render_plan(record: Mapping[str,Any], result: dict[str,Any]) -> None:
-    plan=result['plan']
-    if plan['active']:
-        st.subheader('Planificación para la igualdad de género')
-        (st.warning if plan['pending'] else st.info)(plan['state_text'])
-        rows=plan_stage_rows(result)
-        if rows:st.dataframe(pd.DataFrame(rows),hide_index=True,width='stretch')
-        if plan['other_tool']:
-            for item in plan['actions']:st.warning(item)
-        st.caption('Solo se reconocen las etapas seleccionadas. Declarar implementación no supone aprobación, redacción o comunicación. Estas etapas no suman puntos al índice.')
+    presentation=plan_presentation(result)
+    st.subheader('Situación del Plan de Igualdad')
+    st.write(presentation['intro'])
+    st.info(presentation['summary'])
+    aspects=presentation['aspects']
+    for offset in range(0,len(aspects),2):
+        for column,aspect in zip(st.columns(2),aspects[offset:offset+2]):
+            with column:
+                with st.container(border=True):
+                    st.markdown('**'+aspect['title']+'**')
+                    st.write(aspect['meaning'])
+                    if aspect['selected']:
+                        st.success('Se seleccionó esta opción en el formulario.')
+                    else:
+                        st.info('No se seleccionó esta opción. Hace falta confirmar su situación.')
+                        st.write('**Siguiente paso:** '+aspect['next_action'])
+    st.caption('Estos aspectos describen la organización del plan y no agregan puntos al resultado general.')
     f=RecordFields(record)
     if normalize_response(f.get('weps_30'))=='si':
         detail=text_value(f.get('tv_comunicacion_igualdad_detalle')).strip()
@@ -1749,10 +1937,10 @@ def render_result(entry: dict[str,Any], key: str='company') -> None:
         for issue in result['issues']:st.caption(issue)
         return
     metric_cards([('Prácticas declaradas',percent(result['score'])),('Información disponible',percent(result['coverage'])),('Prácticas por implementar',result['totals']['no']),('Prácticas por verificar',result['totals']['por_verificar'])])
-    display=st.error if result['critical_no'] else (st.warning if result['route']=='completar_informacion' else st.info)
-    display(result['route_text'])
-    if result['provisional']:st.caption('Resultado provisional: revisar la información pendiente y las observaciones de calidad.')
-    st.caption('La puntuación resume prácticas declaradas entre las respuestas conocidas; las prácticas no aplicables se excluyen. Se requiere evidencia para confirmar los avances.')
+    reading=diagnostic_reading(result)
+    esc=lambda value:html.escape(text_value(value))
+    st.markdown('<div class="tv-reading"><h3>Lectura del diagnóstico</h3><p>'+esc(reading['summary'])+'</p><p><strong>'+esc(reading['title'])+'</strong></p><p>'+esc(reading['action'])+'</p><p class="tv-information">'+esc(reading['information'])+'</p></div>',unsafe_allow_html=True)
+    if result['provisional']:st.info('Hay información u observaciones de calidad que necesitan revisarse para completar esta lectura.')
     if result['critical_pending']:st.warning(f"Hay {result['critical_pending']} medidas básicas de protección por verificar.")
     if result['differences']:st.warning('El recálculo encuentra diferencias con los resultados exportados por Kobo. Se muestra el cálculo reconstruido; la administración puede revisar el detalle.')
     st.caption('Verde: avances declarados. Ámbar: ámbitos de mejora. Azul: información por confirmar.')
@@ -1788,10 +1976,16 @@ def render_result(entry: dict[str,Any], key: str='company') -> None:
                 if d['verify']:
                     st.markdown('**Por confirmar**')
                     for item in d['verify']:st.info(item)
+            questions=[p for p in result['practices'] if p['dim']==d['id']]
+            st.markdown('**Resultado de cada pregunta**')
+            st.caption('Los gráficos muestran cuántos puntos aporta cada respuesta Sí y cuántos podrían incorporarse al mejorar una respuesta No, dentro de esta dimensión. Las respuestas por confirmar no reciben un valor de cero.')
+            for position,practice in enumerate(questions,1):
+                render_question(practice,d,position,key+'_question')
             detail=[{'Pregunta':p['question'],'Respuesta':RESPONSE_LABELS[p['status']],
                      'WEP':str(p['wep'])+(' (vínculos: '+p['secondary']+')' if p['secondary'] else ''),
                      'Objetivo del plan':p['objective'],'Peso interno (%)':p['weight']} for p in result['practices'] if p['dim']==d['id']]
-            st.dataframe(pd.DataFrame(detail),hide_index=True,width='stretch')
+            with st.expander('Ver tabla de preguntas y vínculos con el Plan de Igualdad'):
+                st.dataframe(pd.DataFrame(detail),hide_index=True,width='stretch')
     st.subheader('Dimensiones transversales')
     for t in result['transversals']:
         st.write(f"**{t['id']}. {t['title']}:** {t['yes']} prácticas declaradas, {t['no']} por implementar y {t['unknown']} por verificar, de {t['applicable']} aplicables.")
